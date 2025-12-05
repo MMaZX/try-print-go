@@ -17,10 +17,10 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"usqay-print-server/compatibility"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
-	"github.com/yusufpapurcu/wmi"
 	"golang.org/x/net/html"
 )
 
@@ -903,26 +903,26 @@ func startAPIServer() {
 // GESTIÓN DE IMPRESORAS
 // ============================================================================
 
-func getInstalledPrinters() ([]string, error) {
-	var printers []Win32_Printer
-	q := wmi.CreateQuery(&printers, "")
-	err := wmi.Query(q, &printers)
-	if err != nil {
-		return nil, err
-	}
+// func getInstalledPrinters() ([]string, error) {
+// 	var printers []Win32_Printer
+// 	q := wmi.CreateQuery(&printers, "")
+// 	err := wmi.Query(q, &printers)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	result := []string{}
-	for _, p := range printers {
-		result = append(result, p.Name)
-	}
+// 	result := []string{}
+// 	for _, p := range printers {
+// 		result = append(result, p.Name)
+// 	}
 
-	return result, nil
-}
+// 	return result, nil
+// }
 
 func refreshPrinters() error {
 	logger.Info("Iniciando actualización de impresoras...")
 
-	printers, err := getInstalledPrinters()
+	printers, err := compatibility.GetInstalledPrinters()
 	if err != nil {
 		return fmt.Errorf("error obteniendo impresoras: %v", err)
 	}
