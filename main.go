@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -116,21 +117,37 @@ var (
 // ============================================================================
 // FUNCIONES DE RUTAS
 // ============================================================================
+func getBaseConfigDir() string {
+	var homeDir string
+
+	if runtime.GOOS == "windows" {
+		homeDir, _ = os.UserHomeDir()
+		return filepath.Join(homeDir, "usqay", "cnfg")
+	}
+
+	// Linux / Mac
+	// Si se ejecuta con sudo, usar el HOME real del usuario
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		u, err := user.Lookup(sudoUser)
+		if err == nil {
+			homeDir = u.HomeDir
+		}
+	}
+
+	// Si no hay sudo o fallo, usar HOME normal
+	if homeDir == "" {
+		homeDir, _ = os.UserHomeDir()
+	}
+
+	return filepath.Join(homeDir, ".config", "usqay")
+}
 
 func getConfigPath() string {
-	homeDir, _ := os.UserHomeDir()
-	if runtime.GOOS == "windows" {
-		return filepath.Join("C:", "usqay", "cnfg", "config.json")
-	}
-	return filepath.Join(homeDir, ".usqay", "config.json")
+	return filepath.Join(getBaseConfigDir(), "config.json")
 }
 
 func getLogPath() string {
-	homeDir, _ := os.UserHomeDir()
-	if runtime.GOOS == "windows" {
-		return filepath.Join("C:", "usqay", "logs")
-	}
-	return filepath.Join(homeDir, ".usqay", "logs")
+	return filepath.Join(getBaseConfigDir(), "logs")
 }
 
 func getExecutablePath() (string, error) {
@@ -560,16 +577,32 @@ After=network.target mysql.service
 [Service]
 Type=simple
 User=%s
+Group=%s
 WorkingDirectory=%s
+
+Environment=HOME=/home/%s
+Environment=XDG_CONFIG_HOME=/home/%s/.config
+Environment=XDG_DATA_HOME=/home/%s/.local/share
+
 ExecStart=%s
+
 Restart=always
 RestartSec=10
+
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-`, os.Getenv("USER"), filepath.Dir(exePath), exePath)
+`,
+		os.Getenv("SUDO_USER"),
+		os.Getenv("SUDO_USER"),
+		filepath.Dir(exePath),
+		os.Getenv("SUDO_USER"),
+		os.Getenv("SUDO_USER"),
+		os.Getenv("SUDO_USER"),
+		exePath,
+	)
 
 	servicePath := "/etc/systemd/system/usqay-print.service"
 
@@ -902,7 +935,6 @@ func startAPIServer() {
 // ============================================================================
 // GESTIÓN DE IMPRESORAS
 // ============================================================================
-
 
 func refreshPrinters() error {
 	logger.Info("Iniciando actualización de impresoras...")
