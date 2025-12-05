@@ -903,21 +903,6 @@ func startAPIServer() {
 // GESTIÓN DE IMPRESORAS
 // ============================================================================
 
-// func getInstalledPrinters() ([]string, error) {
-// 	var printers []Win32_Printer
-// 	q := wmi.CreateQuery(&printers, "")
-// 	err := wmi.Query(q, &printers)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	result := []string{}
-// 	for _, p := range printers {
-// 		result = append(result, p.Name)
-// 	}
-
-// 	return result, nil
-// }
 
 func refreshPrinters() error {
 	logger.Info("Iniciando actualización de impresoras...")
