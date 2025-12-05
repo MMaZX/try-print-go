@@ -1331,11 +1331,8 @@ func initJobs() {
 
 func showHelp() {
 	fmt.Printf(`
-╔═══════════════════════════════════════════════════════════════╗
-║         Usqay Print Server v%s                          ║
-║         Servidor de impresión multiplataforma                 ║
-╚═══════════════════════════════════════════════════════════════╝
-
+Usqay Print Server v%s
+Servidor de impresión multiplataforma                 
 USO:
   usqay [opciones]
 
