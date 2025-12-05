@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 	"usqay-print-server/compatibility"
+	"usqay-print-server/printer"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -1217,14 +1218,26 @@ func getPrinterConfigsByTitle(terminal, title string) ([]PrinterConfig, error) {
 }
 
 func printHTMLDocument(printerName string, htmlContent []byte, ratio float64, jobID string) error {
+	// Validar dependencias
+	if err := ValidatePrintDependencies(); err != nil {
+		logger.Error("[JOB:%s] Dependencias faltantes: %v", jobID, err)
+		return err
+	}
+
 	logger.Debug("[JOB:%s] Preparando impresión para %s", jobID, printerName)
 
+	// Guardar HTML para debugging
 	if config.SaveDebug {
-		debugPath := filepath.Join(logPath, "prints", fmt.Sprintf("print_%s_%s.html",
-			jobID,
-			strings.ReplaceAll(printerName, " ", "_")))
+		debugPath := filepath.Join(
+			logPath,
+			"prints",
+			fmt.Sprintf("print_%s_%s.html",
+				jobID,
+				strings.ReplaceAll(printerName, " ", "_")),
+		)
 
 		os.MkdirAll(filepath.Dir(debugPath), 0755)
+
 		if err := os.WriteFile(debugPath, htmlContent, 0644); err != nil {
 			logger.Error("[JOB:%s] Error guardando debug: %v", jobID, err)
 		} else {
@@ -1233,8 +1246,15 @@ func printHTMLDocument(printerName string, htmlContent []byte, ratio float64, jo
 	}
 
 	logger.Info("[JOB:%s] 🖨️  Enviando a '%s' (ratio: %.2f)", jobID, printerName, ratio)
-	time.Sleep(100 * time.Millisecond)
 
+	// Llamada al printer por plataforma (Linux/Mac/Windows)
+	if err := printer.PrintPlatform(printerName, htmlContent, ratio, jobID); err != nil {
+		logger.Error("[JOB:%s] Error en impresión: %v", jobID, err)
+		return err
+	}
+
+	// Pausa ligera entre impresiones
+	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
