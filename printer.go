@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"usqay-print-server/printer"
@@ -46,14 +47,38 @@ func validateMacDeps() error {
 }
 
 func Print(printerName string, html []byte, ratio float64, jobID string) error {
-	return printer.PrintPlatform(printerName, html, ratio, jobID)
+	if err := ValidatePrintDependencies(); err != nil {
+		return err
+	}
+
+	pdfPath, err := htmlToPDFTemp(html)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(pdfPath)
+
+	return printer.PrintPlatform(printerName, []byte(pdfPath), ratio, jobID)
 }
 
-// func PrintHTMLDocument(printerName string, htmlContent []byte, jobID string) error {
-// 	// Validar dependencias según el sistema
-// 	if err := ValidatePrintDependencies(); err != nil {
-// 		return err
-// 	}
+func htmlToPDFTemp(html []byte) (string, error) {
+	tmpHTML, err := os.CreateTemp("", "doc-*.html")
+	if err != nil {
+		return "", err
+	}
+	defer tmpHTML.Close()
 
-// 	return printer.Print(printerName, htmlContent, jobID)
-// }
+	if _, err := tmpHTML.Write(html); err != nil {
+		return "", err
+	}
+
+	outPDF := tmpHTML.Name() + ".pdf"
+
+	// Añade la opción para permitir acceso a archivos locales (lo que necesita para About:blank y otros recursos si los hubiera)
+	cmd := exec.Command("wkhtmltopdf", "--enable-local-file-access", tmpHTML.Name(), outPDF)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("wkhtmltopdf error: %v\n%s", err, output)
+	}
+
+	return outPDF, nil
+}

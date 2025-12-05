@@ -17,7 +17,8 @@ func PrintPlatform(printerName string, htmlContent []byte, ratio float64, jobID 
 	}
 
 	// Convertir HTML → PDF
-	cmdPDF := exec.Command("wkhtmltopdf", tmpHTML, tmpPDF)
+	// Lo mismo aplica aquí para asegurar que wkhtmltopdf funcione correctamente.
+	cmdPDF := exec.Command("wkhtmltopdf", "--enable-local-file-access", tmpHTML, tmpPDF)
 	if out, err := cmdPDF.CombinedOutput(); err != nil {
 		return fmt.Errorf("wkhtmltopdf error: %v\n%s", err, string(out))
 	}
@@ -30,4 +31,3 @@ func PrintPlatform(printerName string, htmlContent []byte, ratio float64, jobID 
 
 	return nil
 }
-
