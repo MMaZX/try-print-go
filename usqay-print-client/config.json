@@ -1,0 +1,9 @@
+{
+  "server_url": "wss://app.usqay.com/ws",
+  "terminal_id": "caja-01",
+  "token": "xxxxx",
+  "log_level": "info",
+  "printer_type": "network",
+  "printer_addr": "192.168.1.100:9100",
+  "printer_name": "Epson TM-T20 Receipt"
+}
