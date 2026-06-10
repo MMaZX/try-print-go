@@ -134,6 +134,7 @@ func (c *Connection) handshake(ctx context.Context, wsConn *websocket.Conn) erro
 		Type:       TypeRegister,
 		TerminalID: c.cfg.TerminalID,
 		Token:      c.cfg.Token,
+		Version:    "1.0.3",
 	}
 	if err := wsjson.Write(ctx, wsConn, reg); err != nil {
 		return fmt.Errorf("enviar register: %w", err)
@@ -160,7 +161,7 @@ func (c *Connection) readLoop(ctx context.Context, wsConn *websocket.Conn) error
 			}
 			return fmt.Errorf("leer: %w", err)
 		}
-		c.dispatch(raw)
+		c.dispatch(raw, wsConn)
 	}
 }
 
@@ -187,7 +188,7 @@ func (c *Connection) writeLoop(ctx context.Context, wsConn *websocket.Conn) erro
 }
 
 // dispatch routes an incoming server message to the appropriate handler.
-func (c *Connection) dispatch(raw json.RawMessage) {
+func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 	var env Envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		slog.Warn("mensaje del servidor malformado", "error", err)
@@ -208,6 +209,9 @@ func (c *Connection) dispatch(raw json.RawMessage) {
 		// heartbeat acknowledged — no action needed
 	case TypeKick:
 		slog.Warn("esta terminal fue desplazada por una nueva conexión — reconectando")
+	case "config_refresh":
+		slog.Info("petición de config_refresh recibida del servidor, reconectando...")
+		_ = wsConn.Close(websocket.StatusNormalClosure, "config_refresh")
 	default:
 		slog.Warn("tipo de mensaje desconocido del servidor", "type", env.Type)
 	}

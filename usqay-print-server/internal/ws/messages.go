@@ -1,9 +1,9 @@
-// Package ws handles the WebSocket connection to the print server.
+// Package ws defines the WebSocket protocol between server and print agents.
 package ws
 
 import "encoding/json"
 
-// Protocol message type identifiers (must match the server constants).
+// Protocol message type identifiers.
 const (
 	TypeRegister = "register"
 	TypeConfig   = "config"
@@ -17,14 +17,14 @@ const (
 	TypeKick     = "kick"
 )
 
-// Envelope is used to peek at the type field before full decode.
+// Envelope lets us inspect the type field before full decoding.
 type Envelope struct {
 	Type string `json:"type"`
 }
 
 // --- Client → Server ---
 
-// RegisterMsg is the first message sent on every (re)connection.
+// RegisterMsg is the first message sent by a print agent on connect.
 type RegisterMsg struct {
 	Type       string `json:"type"`
 	TerminalID string `json:"terminal_id"`
@@ -33,15 +33,26 @@ type RegisterMsg struct {
 	Version    string `json:"version,omitempty"`
 }
 
-// AckMsg acknowledges receipt or reports completion of a job.
-// Use TypeReceived, TypePrinted, or TypeError in the Type field.
-type AckMsg struct {
+// ReceivedMsg acknowledges that a job was stored locally in SQLite.
+type ReceivedMsg struct {
 	Type  string `json:"type"`
 	JobID string `json:"job_id"`
-	Msg   string `json:"msg,omitempty"` // error description when Type == TypeError
 }
 
-// SyncMsg reports locally-printed job IDs on reconnect.
+// PrintedMsg confirms that the physical printer processed the job.
+type PrintedMsg struct {
+	Type  string `json:"type"`
+	JobID string `json:"job_id"`
+}
+
+// ErrorMsg reports a failed print attempt.
+type ErrorMsg struct {
+	Type  string `json:"type"`
+	JobID string `json:"job_id"`
+	Msg   string `json:"msg"`
+}
+
+// SyncMsg lists job IDs the client already printed (used on reconnect).
 type SyncMsg struct {
 	Type        string   `json:"type"`
 	PrintedJobs []string `json:"printed_jobs"`
@@ -49,7 +60,13 @@ type SyncMsg struct {
 
 // --- Server → Client ---
 
-// PrintJobMsg delivers a new print job from the server.
+// ConfigMsg carries the printer and routing configuration for the terminal.
+type ConfigMsg struct {
+	Type       string `json:"type"`
+	TerminalID string `json:"terminal_id"`
+}
+
+// PrintJobMsg delivers a print job to the agent.
 type PrintJobMsg struct {
 	Type            string          `json:"type"`
 	JobID           string          `json:"job_id"`
@@ -60,4 +77,15 @@ type PrintJobMsg struct {
 	DocumentoSlug   string          `json:"documento_slug,omitempty"`
 	Payload         json.RawMessage `json:"payload"`
 	ExpiraEn        int             `json:"expira_en,omitempty"`
+}
+
+// KickMsg is sent to the previous connection when a new one registers.
+type KickMsg struct {
+	Type   string `json:"type"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// PongMsg responds to a client ping.
+type PongMsg struct {
+	Type string `json:"type"`
 }

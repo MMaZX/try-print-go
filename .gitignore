@@ -23,10 +23,25 @@ profile.cov
 # Go workspace file
 go.work
 go.work.sum
-
 # env file
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Local builds & binary outputs
+build/
+bin/
+client
+server
+usqay-print-client/build/
+usqay-print-client/client
+usqay-print-server/build/
+usqay-print-server/server
+
+# Local database and logs
+agent.db
+logs/
+*.db
+*.log

@@ -1,0 +1,6 @@
+{
+  "port": 8080,
+  "log_level": "info",
+  "laravel_base_url": "http://127.0.0.1:8001",
+  "internal_token": "mi_token_usqay-print-server-2026-123"
+}
