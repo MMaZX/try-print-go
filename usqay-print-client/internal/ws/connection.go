@@ -212,6 +212,11 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 	case "config_refresh":
 		slog.Info("petición de config_refresh recibida del servidor, reconectando...")
 		_ = wsConn.Close(websocket.StatusNormalClosure, "config_refresh")
+	case "ping":
+		select {
+		case c.outgoing <- outMsg{data: map[string]string{"type": "pong"}}:
+		default:
+		}
 	default:
 		slog.Warn("tipo de mensaje desconocido del servidor", "type", env.Type)
 	}

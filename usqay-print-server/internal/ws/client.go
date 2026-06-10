@@ -21,6 +21,7 @@ type Client struct {
 	connectedAt time.Time
 	lastPing    time.Time
 	send        chan any
+	pingChan    chan bool // used for active pong verification
 	ctx         context.Context
 	cancel      context.CancelFunc
 }
@@ -41,6 +42,32 @@ func (c *Client) Kick(reason string) {
 	time.AfterFunc(200*time.Millisecond, c.cancel)
 }
 
+// VerifyAlive sends a ping and waits for a pong or timeout.
+func (c *Client) VerifyAlive(timeout time.Duration) bool {
+	// Drain any leftover messages in pingChan
+	for {
+		select {
+		case <-c.pingChan:
+		default:
+			goto drained
+		}
+	}
+drained:
+
+	// Send ping
+	c.Send(map[string]string{"type": TypePing})
+
+	// Wait for pong or timeout
+	select {
+	case <-c.pingChan:
+		return true
+	case <-time.After(timeout):
+		return false
+	case <-c.ctx.Done():
+		return false
+	}
+}
+
 // ServeHTTP upgrades the HTTP connection to WebSocket and serves the client
 // for the full duration of the connection. Blocking — called from http.Handler.
 func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *http.Request) {
@@ -54,11 +81,12 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{
-		hub:    hub,
-		conn:   conn,
-		send:   make(chan any, 32),
-		ctx:    ctx,
-		cancel: cancel,
+		hub:      hub,
+		conn:     conn,
+		send:     make(chan any, 32),
+		pingChan: make(chan bool, 1),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 	defer cancel()
 	defer conn.CloseNow()
@@ -152,7 +180,13 @@ func (c *Client) handleRegister(tokens map[string]string) error {
 	c.lastPing = time.Now().UTC()
 
 	hub := c.hub
-	hub.Register(reg.TerminalID, c)
+	success, err := hub.Register(reg.TerminalID, c)
+	if err != nil {
+		return err
+	}
+	if !success {
+		return fmt.Errorf("terminal %q ya tiene una conexión activa y saludable", reg.TerminalID)
+	}
 
 	// Broadcast to monitors
 	hub.broadcastToMonitors(map[string]any{
@@ -252,6 +286,11 @@ func (c *Client) dispatch(msgType string, raw json.RawMessage) {
 		}
 	case TypePing:
 		c.Send(PongMsg{Type: TypePong})
+	case TypePong:
+		select {
+		case c.pingChan <- true:
+		default:
+		}
 	default:
 		slog.Warn("tipo de mensaje desconocido", "type", msgType, "terminal_id", c.terminalID)
 	}

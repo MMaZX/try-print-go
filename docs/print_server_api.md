@@ -153,9 +153,13 @@ Al conectar, el agente envía de inmediato:
   "version": "1.0.3"
 }
 ```
-* **Validación en Go:** El servidor hace un GET a Laravel:
-  `GET <LARAVEL_BASE_URL>/api/tenant/print-configuration/agents/validate?terminal_id=2&token=xxxxx`
-  Laravel debe retornar: `{ "valid": true, "business_id": "empresa-001" }`.
+* **Validación en Go:** 
+  1. El servidor hace un GET a Laravel:
+     `GET <LARAVEL_BASE_URL>/api/tenant/print-configuration/agents/validate?terminal_id=2&token=xxxxx`
+     Laravel debe retornar: `{ "valid": true, "business_id": "empresa-001" }`.
+  2. **Validación de Conexiones Duplicadas (Enfoque Híbrido):** Si ya existe un cliente activo con el mismo `terminal_id`, el servidor envía un Ping de prueba al cliente antiguo y espera una respuesta (Pong) durante **1 segundo**:
+     * **Si responde (Activo/Saludable):** La nueva conexión es rechazada automáticamente indicando que el terminal ya tiene una conexión activa y saludable.
+     * **Si no responde (Zombie/Inactivo):** La conexión antigua es desconectada y removida, y la nueva conexión es aceptada exitosamente.
 * **Respuesta del Servidor al Agente:**
   `{ "type": "config", "terminal_id": "2" }`
 

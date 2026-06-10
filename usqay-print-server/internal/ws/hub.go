@@ -66,18 +66,35 @@ func NewHub(cfg *config.Config) *Hub {
 	}
 }
 
-// Register makes c the active connection for terminalID.
-// If another connection is active for that terminal, it is kicked first.
-func (h *Hub) Register(terminalID string, c *Client) {
+// Register attempts to make c the active connection for terminalID.
+// If another connection is active, it verifies if it is alive before kicking it.
+// Returns true if registration succeeded, false if rejected because the existing client is alive.
+func (h *Hub) Register(terminalID string, c *Client) (bool, error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	old, exists := h.clients[terminalID]
+	h.mu.Unlock()
 
-	if old, exists := h.clients[terminalID]; exists && old != c {
-		slog.Warn("kick: conexión anterior desplazada", "terminal_id", terminalID)
-		old.Kick("nueva conexión registrada")
+	if exists && old != c {
+		slog.Info("candidato duplicado detectado, verificando salud del cliente actual", "terminal_id", terminalID)
+		if old.VerifyAlive(1 * time.Second) {
+			slog.Warn("registro rechazado: el cliente actual responde y está activo", "terminal_id", terminalID)
+			return false, nil
+		}
+		// If not alive, kick the old zombie and replace it
+		slog.Warn("kick: cliente anterior inactivo/zombie detectado, desplazándolo", "terminal_id", terminalID)
+		old.Kick("nueva conexión registrada (anterior inactiva)")
+	}
+
+	h.mu.Lock()
+	// Re-check in case another client registered while we were waiting
+	if current, exists := h.clients[terminalID]; exists && current != c {
+		current.Kick("nueva conexión registrada")
 	}
 	h.clients[terminalID] = c
-	slog.Info("terminal registrado", "terminal_id", terminalID)
+	h.mu.Unlock()
+
+	slog.Info("terminal registrado exitosamente", "terminal_id", terminalID)
+	return true, nil
 }
 
 // Unregister removes c from the registry only if it is still the active connection.
