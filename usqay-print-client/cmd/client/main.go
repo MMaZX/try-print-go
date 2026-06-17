@@ -31,6 +31,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
 
 	// --- Logging (archivo diario + stdout) ---
 	logDir := filepath.Join(resolveExeDir(), "logs")
@@ -49,7 +53,7 @@ func main() {
 		slog.Info("logs archivados", "zip", result.ZipPath, "archivos", result.Archived)
 	}
 
-	slog.Info("usqay-print-client iniciado", "terminal_id", cfg.TerminalID)
+	slog.Info("usqay-print-client iniciado")
 
 	// --- Listar impresoras y salir ---
 	if *listFlag {
@@ -69,12 +73,8 @@ func main() {
 		return
 	}
 
-	// --- Impresora ---
-	p, err := buildPrinter(cfg)
-	if err != nil {
-		slog.Error("error al crear impresora", "error", err)
-		os.Exit(1)
-	}
+	// --- Registro de impresoras (se puebla al recibir TypeConfig del servidor) ---
+	registry := printer.NewRegistry()
 
 	// --- SQLite ---
 	dbPath := filepath.Join(resolveExeDir(), "agent.db")
@@ -88,7 +88,7 @@ func main() {
 
 	repo := queue.NewRepository(db)
 
-	// --- Insertar trabajo de prueba (modo Etapa 2) ---
+	// --- Insertar trabajo de prueba ---
 	if *insertFlag {
 		job := buildTestJob()
 		if err := repo.Insert(job); err != nil {
@@ -99,20 +99,14 @@ func main() {
 		return
 	}
 
-	// --- Validar config para WebSocket ---
-	if err := cfg.ValidateWebSocket(); err != nil {
-		slog.Error("configuración incompleta para WebSocket", "error", err)
-		os.Exit(1)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// --- Conexión WebSocket ---
-	conn := ws.NewConnection(cfg, repo)
+	conn := ws.NewConnection(cfg, repo, registry)
 
 	// --- Worker con callback de notificación al servidor ---
-	worker := queue.NewWorker(repo, p, func(jobID string, estado queue.Estado, errMsg string) {
+	worker := queue.NewWorker(repo, registry, func(jobID string, estado queue.Estado, errMsg string) {
 		conn.Notify(jobID, estado, errMsg)
 	})
 
@@ -127,24 +121,6 @@ func main() {
 	slog.Info("apagando...")
 	cancel()
 	time.Sleep(600 * time.Millisecond) // drain in-flight messages
-}
-
-// buildPrinter creates the Printer from config.json.
-func buildPrinter(cfg *config.Config) (printer.Printer, error) {
-	switch printer.Type(cfg.PrinterType) {
-	case printer.TypeNetwork:
-		if cfg.PrinterAddr == "" {
-			return nil, fmt.Errorf("printer_addr es requerido para tipo \"network\"")
-		}
-		return printer.NewNetworkPrinter(cfg.PrinterAddr), nil
-	case printer.TypeSystem:
-		if cfg.PrinterName == "" {
-			return nil, fmt.Errorf("printer_name es requerido para tipo \"system\"")
-		}
-		return printer.NewSystemPrinter(cfg.PrinterName), nil
-	default:
-		return nil, fmt.Errorf("printer_type desconocido %q — usa \"network\" o \"system\"", cfg.PrinterType)
-	}
 }
 
 // buildTestJob builds a sample comanda job for -insert flag testing.

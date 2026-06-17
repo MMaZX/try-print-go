@@ -18,15 +18,15 @@ type NotifyFunc func(jobID string, estado Estado, errMsg string)
 // It runs until ctx is cancelled. No error ever causes a panic — all failures
 // are logged and persisted as ERROR state so the queue remains operational.
 type Worker struct {
-	repo    *Repository
-	printer printer.Printer
-	notify  NotifyFunc // may be nil
+	repo     *Repository
+	registry *printer.Registry
+	notify   NotifyFunc // may be nil
 }
 
-// NewWorker creates a Worker backed by repo and p.
+// NewWorker creates a Worker backed by repo and the printer registry.
 // notify is called after each job reaches PRINTED or ERROR; pass nil to skip.
-func NewWorker(repo *Repository, p printer.Printer, notify NotifyFunc) *Worker {
-	return &Worker{repo: repo, printer: p, notify: notify}
+func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc) *Worker {
+	return &Worker{repo: repo, registry: registry, notify: notify}
 }
 
 // Run blocks, polling for PENDING jobs every 500ms, until ctx is done.
@@ -56,7 +56,20 @@ func (w *Worker) processNext() {
 		return
 	}
 
-	slog.Info("procesando trabajo", "job_id", job.ID, "tipo", job.TipoDocumento)
+	// Wait for the server to deliver printer configuration before processing.
+	if w.registry.Len() == 0 {
+		return
+	}
+
+	p, ok := w.registry.Resolve(job.ImpresoraID)
+	if !ok {
+		slog.Error("impresora no encontrada en registro",
+			"job_id", job.ID, "impresora_id", job.ImpresoraID)
+		w.finalize(job.ID, EstadoError, "impresora_id no registrada: "+job.ImpresoraID)
+		return
+	}
+
+	slog.Info("procesando trabajo", "job_id", job.ID, "tipo", job.TipoDocumento, "impresora_id", job.ImpresoraID)
 
 	if err := w.repo.UpdateStatus(job.ID, EstadoProcessing, ""); err != nil {
 		slog.Error("error actualizando a PROCESSING", "job_id", job.ID, "error", err)
@@ -71,7 +84,7 @@ func (w *Worker) processNext() {
 	}
 
 	start := time.Now()
-	printErr := w.printer.Print(data)
+	printErr := p.Print(data)
 	duration := time.Since(start)
 
 	if printErr != nil {

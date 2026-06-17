@@ -21,6 +21,7 @@ type PrintJob struct {
 	ID            string
 	Payload       string
 	TipoDocumento string
+	ImpresoraID   string // UUID from impresoras table; used to resolve the target printer
 	Estado        Estado
 	ErrorMsg      string
 	CreatedAt     time.Time
@@ -40,9 +41,9 @@ func NewRepository(db *sql.DB) *Repository {
 // Insert persists a new job with state PENDING.
 func (r *Repository) Insert(job PrintJob) error {
 	_, err := r.db.Exec(
-		`INSERT INTO print_jobs (id, payload, tipo_documento, estado, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		job.ID, job.Payload, job.TipoDocumento, EstadoPending, job.CreatedAt, job.UpdatedAt,
+		`INSERT INTO print_jobs (id, payload, tipo_documento, impresora_id, estado, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		job.ID, job.Payload, job.TipoDocumento, job.ImpresoraID, EstadoPending, job.CreatedAt, job.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insertar trabajo %s: %w", job.ID, err)
@@ -53,7 +54,7 @@ func (r *Repository) Insert(job PrintJob) error {
 // NextPending returns the oldest PENDING job, or nil if the queue is empty.
 func (r *Repository) NextPending() (*PrintJob, error) {
 	row := r.db.QueryRow(
-		`SELECT id, payload, tipo_documento, estado, COALESCE(error_msg,''), created_at, updated_at
+		`SELECT id, payload, tipo_documento, impresora_id, estado, COALESCE(error_msg,''), created_at, updated_at
 		 FROM print_jobs
 		 WHERE estado = ?
 		 ORDER BY created_at
@@ -62,7 +63,7 @@ func (r *Repository) NextPending() (*PrintJob, error) {
 	)
 	var job PrintJob
 	err := row.Scan(
-		&job.ID, &job.Payload, &job.TipoDocumento, &job.Estado,
+		&job.ID, &job.Payload, &job.TipoDocumento, &job.ImpresoraID, &job.Estado,
 		&job.ErrorMsg, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -89,7 +90,7 @@ func (r *Repository) UpdateStatus(id string, estado Estado, errorMsg string) err
 // ListByStatus returns all jobs with the given state, ordered by creation time.
 func (r *Repository) ListByStatus(estado Estado) ([]PrintJob, error) {
 	rows, err := r.db.Query(
-		`SELECT id, payload, tipo_documento, estado, COALESCE(error_msg,''), created_at, updated_at
+		`SELECT id, payload, tipo_documento, impresora_id, estado, COALESCE(error_msg,''), created_at, updated_at
 		 FROM print_jobs
 		 WHERE estado = ?
 		 ORDER BY created_at`,
@@ -104,7 +105,7 @@ func (r *Repository) ListByStatus(estado Estado) ([]PrintJob, error) {
 	for rows.Next() {
 		var job PrintJob
 		if err := rows.Scan(
-			&job.ID, &job.Payload, &job.TipoDocumento, &job.Estado,
+			&job.ID, &job.Payload, &job.TipoDocumento, &job.ImpresoraID, &job.Estado,
 			&job.ErrorMsg, &job.CreatedAt, &job.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan trabajo: %w", err)

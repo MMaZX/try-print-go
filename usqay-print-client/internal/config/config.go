@@ -9,18 +9,9 @@ import (
 
 // Config holds all runtime configuration loaded from config.json.
 type Config struct {
-	// Etapa 3 — WebSocket connection
-	ServerURL  string `json:"server_url"`
-	TerminalID string `json:"terminal_id"`
-	Token      string `json:"token"`
-
-	// Shared
-	LogLevel string `json:"log_level"`
-
-	// Etapa 1 — printer test
-	PrinterType string `json:"printer_type"` // "network" or "system"
-	PrinterAddr string `json:"printer_addr"` // network: "192.168.1.100:9100"
-	PrinterName string `json:"printer_name"` // system: OS printer name
+	ServerURL string `json:"server_url"`
+	Token     string `json:"token"`
+	LogLevel  string `json:"log_level"`
 }
 
 // Load reads config.json from the directory containing the executable.
@@ -53,13 +44,10 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-// ValidateWebSocket checks that the fields required for WebSocket connectivity are present.
-func (c *Config) ValidateWebSocket() error {
+// Validate checks that all required fields are present.
+func (c *Config) Validate() error {
 	if c.ServerURL == "" {
 		return fmt.Errorf("server_url es requerido en config.json")
-	}
-	if c.TerminalID == "" {
-		return fmt.Errorf("terminal_id es requerido en config.json")
 	}
 	if c.Token == "" {
 		return fmt.Errorf("token es requerido en config.json")

@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"usqay-print-client/internal/config"
+	"usqay-print-client/internal/printer"
 	"usqay-print-client/internal/queue"
 )
 
@@ -27,16 +28,19 @@ type outMsg struct {
 // Connection manages the WebSocket connection to the print server, including
 // automatic reconnection with exponential backoff.
 type Connection struct {
-	cfg      *config.Config
-	repo     *queue.Repository
-	outgoing chan outMsg // buffered; written by Notify, drained by writeLoop
+	cfg        *config.Config
+	repo       *queue.Repository
+	registry   *printer.Registry
+	terminalID string   // set after receiving TypeConfig from the server
+	outgoing   chan outMsg // buffered; written by Notify, drained by writeLoop
 }
 
 // NewConnection creates a Connection. Call Run in a goroutine to activate it.
-func NewConnection(cfg *config.Config, repo *queue.Repository) *Connection {
+func NewConnection(cfg *config.Config, repo *queue.Repository, registry *printer.Registry) *Connection {
 	return &Connection{
 		cfg:      cfg,
 		repo:     repo,
+		registry: registry,
 		outgoing: make(chan outMsg, 64),
 	}
 }
@@ -101,7 +105,7 @@ func (c *Connection) connectAndServe(ctx context.Context) error {
 	if err := c.handshake(connCtx, wsConn); err != nil {
 		return err
 	}
-	slog.Info("registrado con el servidor", "terminal_id", c.cfg.TerminalID)
+	slog.Info("registrado con el servidor")
 
 	// Run both loops concurrently; either failing triggers connCancel.
 	errCh := make(chan error, 2)
@@ -131,10 +135,9 @@ func (c *Connection) connectAndServe(ctx context.Context) error {
 // handshake sends the register and sync messages before entering the main loops.
 func (c *Connection) handshake(ctx context.Context, wsConn *websocket.Conn) error {
 	reg := RegisterMsg{
-		Type:       TypeRegister,
-		TerminalID: c.cfg.TerminalID,
-		Token:      c.cfg.Token,
-		Version:    "1.0.3",
+		Type:    TypeRegister,
+		Token:   c.cfg.Token,
+		Version: "1.0.3",
 	}
 	if err := wsjson.Write(ctx, wsConn, reg); err != nil {
 		return fmt.Errorf("enviar register: %w", err)
@@ -197,7 +200,12 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 
 	switch env.Type {
 	case TypeConfig:
-		slog.Info("configuración recibida del servidor")
+		var msg ConfigMsg
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			slog.Error("error parseando config", "error", err)
+			return
+		}
+		c.applyConfig(msg)
 	case TypePrint:
 		var msg PrintJobMsg
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -207,6 +215,13 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 		c.handlePrintJob(msg)
 	case TypePong:
 		// heartbeat acknowledged — no action needed
+	case TypeListPrinters:
+		var m ListPrintersMsg
+		if err := json.Unmarshal(raw, &m); err != nil {
+			slog.Error("error parseando list_printers", "error", err)
+			return
+		}
+		go c.handleListPrinters(m)
 	case TypeKick:
 		slog.Warn("esta terminal fue desplazada por una nueva conexión — reconectando")
 	case "config_refresh":
@@ -228,6 +243,7 @@ func (c *Connection) handlePrintJob(msg PrintJobMsg) {
 	job := queue.PrintJob{
 		ID:            msg.JobID,
 		TipoDocumento: msg.TipoDocumento,
+		ImpresoraID:   msg.ImpresoraNameID,
 		Payload:       string(msg.Payload),
 		Estado:        queue.EstadoPending,
 		CreatedAt:     now,
@@ -260,4 +276,61 @@ func (c *Connection) buildSync() (SyncMsg, error) {
 		ids = append(ids, j.ID)
 	}
 	return SyncMsg{Type: TypeSync, PrintedJobs: ids}, nil
+}
+
+// applyConfig populates the printer registry from the ConfigMsg sent by the server.
+// Called each time a TypeConfig message is received (connection and config_refresh).
+func (c *Connection) applyConfig(msg ConfigMsg) {
+	c.terminalID = msg.TerminalID
+	c.registry.Clear()
+	count := 0
+	for _, spec := range msg.Printers {
+		p := buildPrinterFromSpec(spec)
+		if p == nil {
+			slog.Warn("tipo de impresora desconocido, ignorado", "id", spec.ID, "tipo", spec.Tipo)
+			continue
+		}
+		c.registry.Set(spec.ID, p)
+		count++
+	}
+	slog.Info("configuración aplicada", "terminal_id", msg.TerminalID, "impresoras", count)
+}
+
+// handleListPrinters responds to a list_printers request from the server with the OS printer names.
+func (c *Connection) handleListPrinters(m ListPrintersMsg) {
+	names, err := printer.ListPrinters()
+	if err != nil {
+		slog.Error("error listando impresoras del OS", "error", err)
+	}
+	if names == nil {
+		names = []string{}
+	}
+	slog.Info("respondiendo lista de impresoras", "request_id", m.RequestID, "count", len(names))
+	select {
+	case c.outgoing <- outMsg{data: PrinterListMsg{
+		Type:      TypePrinterList,
+		RequestID: m.RequestID,
+		Printers:  names,
+	}}:
+	default:
+		slog.Warn("printer_list descartado (canal lleno)", "request_id", m.RequestID)
+	}
+}
+
+// buildPrinterFromSpec maps a PrinterSpec received from the server to a live Printer.
+func buildPrinterFromSpec(spec PrinterSpec) printer.Printer {
+	switch spec.Tipo {
+	case "RED":
+		if spec.Addr == "" {
+			return nil
+		}
+		return printer.NewNetworkPrinter(spec.Addr)
+	case "USB", "SERIE":
+		if spec.Addr == "" {
+			return nil
+		}
+		return printer.NewSystemPrinter(spec.Addr)
+	default:
+		return nil
+	}
 }

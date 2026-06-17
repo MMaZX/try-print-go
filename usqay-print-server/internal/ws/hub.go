@@ -47,22 +47,24 @@ type AgentStatus struct {
 // Hub maintains the active terminal registry and the in-memory job queue.
 // All methods are safe for concurrent use.
 type Hub struct {
-	mu       sync.RWMutex
-	cfg      *config.Config
-	clients  map[string]*Client      // terminal_id → active client
-	jobs     map[string]*ServerJob   // job_id → job
-	pending  map[string][]*ServerJob // terminal_id → undelivered jobs
-	monitors map[*MonitorClient]bool // active browser monitors
+	mu                  sync.RWMutex
+	cfg                 *config.Config
+	clients             map[string]*Client      // terminal_id → active client
+	jobs                map[string]*ServerJob   // job_id → job
+	pending             map[string][]*ServerJob // terminal_id → undelivered jobs
+	monitors            map[*MonitorClient]bool // active browser monitors
+	printerListRequests map[string]chan []string // request_id → response channel
 }
 
 // NewHub creates an empty Hub.
 func NewHub(cfg *config.Config) *Hub {
 	return &Hub{
-		cfg:      cfg,
-		clients:  make(map[string]*Client),
-		jobs:     make(map[string]*ServerJob),
-		pending:  make(map[string][]*ServerJob),
-		monitors: make(map[*MonitorClient]bool),
+		cfg:                 cfg,
+		clients:             make(map[string]*Client),
+		jobs:                make(map[string]*ServerJob),
+		pending:             make(map[string][]*ServerJob),
+		monitors:            make(map[*MonitorClient]bool),
+		printerListRequests: make(map[string]chan []string),
 	}
 }
 
@@ -501,10 +503,13 @@ func (h *Hub) validateMonitorTokenWithLaravel(token string) (bool, error) {
 		return false, fmt.Errorf("laravel_base_url no configurado")
 	}
 
-	url := fmt.Sprintf("%s/api/tenant/print-configuration/monitor-token/validate?token=%s",
-		h.cfg.LaravelBaseURL, token)
-
-	req, err := http.NewRequest("GET", url, nil)
+	url := fmt.Sprintf("%s/api/tenant/print-configuration/monitor-token/validate",
+		h.cfg.LaravelBaseURL)
+	body := strings.NewReader(`{"token":"` + token + `"}`)
+	req, err := http.NewRequest("POST", url, body)
+	if err == nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if err != nil {
 		return false, fmt.Errorf("crear request: %w", err)
 	}
@@ -532,6 +537,54 @@ func (h *Hub) validateMonitorTokenWithLaravel(token string) (bool, error) {
 	}
 
 	return res.Valid, nil
+}
+
+// RequestPrinterList sends a list_printers request to the connected agent and waits for the response.
+// Returns an error if the terminal is not connected or if the request times out.
+func (h *Hub) RequestPrinterList(terminalID string) ([]string, error) {
+	h.mu.RLock()
+	client, online := h.clients[terminalID]
+	h.mu.RUnlock()
+
+	if !online {
+		return nil, fmt.Errorf("terminal %s no está conectado", terminalID)
+	}
+
+	reqID := newJobID()
+	ch := make(chan []string, 1)
+
+	h.mu.Lock()
+	h.printerListRequests[reqID] = ch
+	h.mu.Unlock()
+
+	defer func() {
+		h.mu.Lock()
+		delete(h.printerListRequests, reqID)
+		h.mu.Unlock()
+	}()
+
+	client.Send(ListPrintersMsg{Type: TypeListPrinters, RequestID: reqID})
+
+	select {
+	case printers := <-ch:
+		return printers, nil
+	case <-time.After(10 * time.Second):
+		return nil, fmt.Errorf("timeout esperando lista de impresoras del terminal %s", terminalID)
+	}
+}
+
+// ResolvePrinterList delivers a printer_list response to its waiting request.
+func (h *Hub) ResolvePrinterList(requestID string, printers []string) {
+	h.mu.Lock()
+	ch, ok := h.printerListRequests[requestID]
+	h.mu.Unlock()
+
+	if ok {
+		select {
+		case ch <- printers:
+		default:
+		}
+	}
 }
 
 func newJobID() string {

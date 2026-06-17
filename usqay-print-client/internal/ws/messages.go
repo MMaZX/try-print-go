@@ -5,16 +5,18 @@ import "encoding/json"
 
 // Protocol message type identifiers (must match the server constants).
 const (
-	TypeRegister = "register"
-	TypeConfig   = "config"
-	TypePrint    = "print"
-	TypeReceived = "received"
-	TypePrinted  = "printed"
-	TypeError    = "error"
-	TypeSync     = "sync"
-	TypePing     = "ping"
-	TypePong     = "pong"
-	TypeKick     = "kick"
+	TypeRegister     = "register"
+	TypeConfig       = "config"
+	TypePrint        = "print"
+	TypeReceived     = "received"
+	TypePrinted      = "printed"
+	TypeError        = "error"
+	TypeSync         = "sync"
+	TypePing         = "ping"
+	TypePong         = "pong"
+	TypeKick         = "kick"
+	TypeListPrinters = "list_printers"
+	TypePrinterList  = "printer_list"
 )
 
 // Envelope is used to peek at the type field before full decode.
@@ -25,12 +27,12 @@ type Envelope struct {
 // --- Client → Server ---
 
 // RegisterMsg is the first message sent on every (re)connection.
+// The server derives the terminal identity from the token; the client
+// does not need to supply terminal_id.
 type RegisterMsg struct {
-	Type       string `json:"type"`
-	TerminalID string `json:"terminal_id"`
-	BusinessID string `json:"business_id,omitempty"`
-	Token      string `json:"token"`
-	Version    string `json:"version,omitempty"`
+	Type    string `json:"type"`
+	Token   string `json:"token"`
+	Version string `json:"version,omitempty"`
 }
 
 // AckMsg acknowledges receipt or reports completion of a job.
@@ -49,6 +51,20 @@ type SyncMsg struct {
 
 // --- Server → Client ---
 
+// PrinterSpec describes a physical printer pushed by the server in ConfigMsg.
+type PrinterSpec struct {
+	ID   string `json:"id"`   // UUID from impresoras table; matches ImpresoraNameID in print jobs
+	Tipo string `json:"tipo"` // "RED" | "USB" | "SERIE"
+	Addr string `json:"addr"` // IP:port for RED; OS printer name for USB/SERIE
+}
+
+// ConfigMsg is sent by the server after successful token validation.
+type ConfigMsg struct {
+	Type       string        `json:"type"`
+	TerminalID string        `json:"terminal_id"`
+	Printers   []PrinterSpec `json:"printers"`
+}
+
 // PrintJobMsg delivers a new print job from the server.
 type PrintJobMsg struct {
 	Type            string          `json:"type"`
@@ -60,4 +76,17 @@ type PrintJobMsg struct {
 	DocumentoSlug   string          `json:"documento_slug,omitempty"`
 	Payload         json.RawMessage `json:"payload"`
 	ExpiraEn        int             `json:"expira_en,omitempty"`
+}
+
+// ListPrintersMsg is sent by the server to request available OS printer names from this agent.
+type ListPrintersMsg struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+}
+
+// PrinterListMsg is the agent's response carrying OS printer names.
+type PrinterListMsg struct {
+	Type      string   `json:"type"`
+	RequestID string   `json:"request_id"`
+	Printers  []string `json:"printers"`
 }

@@ -5,16 +5,18 @@ import "encoding/json"
 
 // Protocol message type identifiers.
 const (
-	TypeRegister = "register"
-	TypeConfig   = "config"
-	TypePrint    = "print"
-	TypeReceived = "received"
-	TypePrinted  = "printed"
-	TypeError    = "error"
-	TypeSync     = "sync"
-	TypePing     = "ping"
-	TypePong     = "pong"
-	TypeKick     = "kick"
+	TypeRegister     = "register"
+	TypeConfig       = "config"
+	TypePrint        = "print"
+	TypeReceived     = "received"
+	TypePrinted      = "printed"
+	TypeError        = "error"
+	TypeSync         = "sync"
+	TypePing         = "ping"
+	TypePong         = "pong"
+	TypeKick         = "kick"
+	TypeListPrinters = "list_printers"
+	TypePrinterList  = "printer_list"
 )
 
 // Envelope lets us inspect the type field before full decoding.
@@ -25,10 +27,12 @@ type Envelope struct {
 // --- Client → Server ---
 
 // RegisterMsg is the first message sent by a print agent on connect.
+// TerminalID is optional: it is used only for local-dev token fallback.
+// In production with LaravelBaseURL configured, the server derives the
+// terminal identity from the token via the agents/validate endpoint.
 type RegisterMsg struct {
 	Type       string `json:"type"`
-	TerminalID string `json:"terminal_id"`
-	BusinessID string `json:"business_id,omitempty"`
+	TerminalID string `json:"terminal_id,omitempty"`
 	Token      string `json:"token"`
 	Version    string `json:"version,omitempty"`
 }
@@ -60,10 +64,21 @@ type SyncMsg struct {
 
 // --- Server → Client ---
 
-// ConfigMsg carries the printer and routing configuration for the terminal.
+// PrinterSpec describes a physical printer pushed to the agent on connect.
+// ID matches the ImpresoraNameID field that arrives in PrintJobMsg, so the
+// agent can look up connection details at print time without extra round-trips.
+type PrinterSpec struct {
+	ID   string `json:"id"`   // UUID from impresoras table
+	Tipo string `json:"tipo"` // "RED" | "USB" | "SERIE"
+	Addr string `json:"addr"` // IP:port for RED; OS printer name for USB/SERIE
+}
+
+// ConfigMsg carries the terminal identity and printer list after registration.
+// The client stores this in memory and uses Printers to resolve each print job.
 type ConfigMsg struct {
-	Type       string `json:"type"`
-	TerminalID string `json:"terminal_id"`
+	Type       string        `json:"type"`
+	TerminalID string        `json:"terminal_id"`
+	Printers   []PrinterSpec `json:"printers"`
 }
 
 // PrintJobMsg delivers a print job to the agent.
@@ -88,4 +103,17 @@ type KickMsg struct {
 // PongMsg responds to a client ping.
 type PongMsg struct {
 	Type string `json:"type"`
+}
+
+// ListPrintersMsg is sent to an agent to request its available OS printer names.
+type ListPrintersMsg struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+}
+
+// PrinterListMsg is the agent's response carrying the OS printer names.
+type PrinterListMsg struct {
+	Type      string   `json:"type"`
+	RequestID string   `json:"request_id"`
+	Printers  []string `json:"printers"`
 }

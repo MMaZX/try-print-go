@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ type Client struct {
 	conn        *websocket.Conn
 	terminalID  string
 	businessID  string
+	printers    []PrinterSpec // populated from Laravel validate response
 	connectedAt time.Time
 	lastPing    time.Time
 	send        chan any
@@ -110,8 +112,8 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 	writeErr := make(chan error, 1)
 	go func() { writeErr <- c.writePump() }()
 
-	// Step 3: Send initial config and deliver any queued jobs.
-	c.Send(ConfigMsg{Type: TypeConfig, TerminalID: c.terminalID})
+	// Step 3: Send initial config (terminal identity + printers) and deliver any queued jobs.
+	c.Send(ConfigMsg{Type: TypeConfig, TerminalID: c.terminalID, Printers: c.printers})
 	hub.FlushPending(c.terminalID, c)
 
 	// Step 4: Read pump blocks until the connection dies.
@@ -123,6 +125,9 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 }
 
 // handleRegister reads and validates the first message on the connection.
+// In Laravel mode the terminal identity is derived from the token; the client
+// does not need to supply terminal_id. In local-dev mode terminal_id is still
+// read from the RegisterMsg and matched against the tokens map.
 func (c *Client) handleRegister(tokens map[string]string) error {
 	regCtx, regCancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer regCancel()
@@ -144,96 +149,122 @@ func (c *Client) handleRegister(tokens map[string]string) error {
 	if err := json.Unmarshal(raw, &reg); err != nil {
 		return fmt.Errorf("parsear register: %w", err)
 	}
-	if reg.TerminalID == "" {
-		return fmt.Errorf("terminal_id vacío")
+	if reg.Token == "" {
+		return fmt.Errorf("token vacío en mensaje de registro")
 	}
 
-	valid := false
-	businessID := ""
-	var valErr error
+	var (
+		valid      bool
+		terminalID string
+		businessID string
+		printers   []PrinterSpec
+	)
 
 	if c.hub.cfg.LaravelBaseURL != "" {
-		valid, businessID, valErr = c.validateWithLaravel(reg.TerminalID, reg.Token)
+		var valErr error
+		valid, terminalID, businessID, printers, valErr = c.validateWithLaravel(reg.Token)
 		if valErr != nil {
-			slog.Warn("error validando con Laravel, intentando fallback local", "terminal_id", reg.TerminalID, "error", valErr)
-			expected, ok := tokens[reg.TerminalID]
-			if ok && expected == reg.Token {
-				valid = true
-				businessID = "local-fallback"
+			// Laravel unreachable — fall back to local token map if the client
+			// still supplied terminal_id (compatible with old clients/dev setups).
+			slog.Warn("error validando con Laravel, intentando fallback local", "error", valErr)
+			if reg.TerminalID != "" {
+				if expected, ok := tokens[reg.TerminalID]; ok && expected == reg.Token {
+					valid = true
+					terminalID = reg.TerminalID
+					businessID = "local-fallback"
+				}
 			}
 		}
 	} else {
-		expected, ok := tokens[reg.TerminalID]
-		if ok && expected == reg.Token {
+		if len(tokens) == 0 {
+			// No auth configured — open mode for dev/testing.
 			valid = true
-			businessID = "local-development"
+			terminalID = reg.TerminalID
+			if terminalID == "" {
+				terminalID = "unknown"
+			}
+			businessID = "no-auth"
+			slog.Warn("modo sin autenticación activo", "terminal_id", terminalID)
+		} else if reg.TerminalID != "" {
+			if expected, ok := tokens[reg.TerminalID]; ok && expected == reg.Token {
+				valid = true
+				terminalID = reg.TerminalID
+				businessID = "local-development"
+			}
 		}
 	}
 
 	if !valid {
-		return fmt.Errorf("token inválido para terminal %q", reg.TerminalID)
+		return fmt.Errorf("token inválido")
+	}
+	if terminalID == "" {
+		return fmt.Errorf("terminal_id no determinado: token válido pero Laravel no devolvió terminal_id")
 	}
 
-	c.terminalID = reg.TerminalID
+	c.terminalID = terminalID
 	c.businessID = businessID
+	c.printers = printers
 	c.connectedAt = time.Now().UTC()
 	c.lastPing = time.Now().UTC()
 
 	hub := c.hub
-	success, err := hub.Register(reg.TerminalID, c)
+	success, err := hub.Register(terminalID, c)
 	if err != nil {
 		return err
 	}
 	if !success {
-		return fmt.Errorf("terminal %q ya tiene una conexión activa y saludable", reg.TerminalID)
+		return fmt.Errorf("terminal %q ya tiene una conexión activa y saludable", terminalID)
 	}
 
-	// Broadcast to monitors
 	hub.broadcastToMonitors(map[string]any{
 		"type":        "agent_connected",
-		"terminal_id": reg.TerminalID,
+		"terminal_id": terminalID,
 		"version":     reg.Version,
 	})
 
-	slog.Info("terminal autenticado", "terminal_id", reg.TerminalID, "business_id", c.businessID)
+	slog.Info("terminal autenticado", "terminal_id", terminalID, "business_id", businessID, "impresoras", len(printers))
 	return nil
 }
 
-// validateWithLaravel queries Laravel's agent validation endpoint.
-func (c *Client) validateWithLaravel(terminalID, token string) (bool, string, error) {
+// validateWithLaravel calls POST /api/tenant/print-configuration/agents/validate
+// with the agent token and returns the resolved terminal identity and printer list.
+// The endpoint is protected by the print.server middleware (X-Internal-Token).
+func (c *Client) validateWithLaravel(token string) (valid bool, terminalID, businessID string, printers []PrinterSpec, err error) {
 	cfg := c.hub.cfg
-	url := fmt.Sprintf("%s/api/tenant/print-configuration/agents/validate?terminal_id=%s&token=%s",
-		cfg.LaravelBaseURL, terminalID, token)
+	endpoint := cfg.LaravelBaseURL + "/api/tenant/print-configuration/agents/validate"
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return false, "", fmt.Errorf("crear request: %w", err)
+	body, _ := json.Marshal(map[string]string{"token": token})
+	req, reqErr := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if reqErr != nil {
+		return false, "", "", nil, fmt.Errorf("crear request: %w", reqErr)
 	}
-
+	req.Header.Set("Content-Type", "application/json")
 	if cfg.InternalToken != "" {
 		req.Header.Set("X-Internal-Token", cfg.InternalToken)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, "", fmt.Errorf("ejecutar request: %w", err)
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	resp, reqErr := httpClient.Do(req)
+	if reqErr != nil {
+		return false, "", "", nil, fmt.Errorf("ejecutar request: %w", reqErr)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, "", fmt.Errorf("laravel devolvió status %d", resp.StatusCode)
+		return false, "", "", nil, fmt.Errorf("laravel devolvió status %d", resp.StatusCode)
 	}
 
 	var res struct {
-		Valid      bool   `json:"valid"`
-		BusinessID string `json:"business_id"`
+		Valid      bool          `json:"valid"`
+		TerminalID string        `json:"terminal_id"`
+		BusinessID string        `json:"business_id"`
+		Printers   []PrinterSpec `json:"printers"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return false, "", fmt.Errorf("decodificar respuesta: %w", err)
+	if reqErr := json.NewDecoder(resp.Body).Decode(&res); reqErr != nil {
+		return false, "", "", nil, fmt.Errorf("decodificar respuesta: %w", reqErr)
 	}
 
-	return res.Valid, res.BusinessID, nil
+	return res.Valid, res.TerminalID, res.BusinessID, res.Printers, nil
 }
 
 // readPump reads messages from the WebSocket and dispatches them.
@@ -290,6 +321,11 @@ func (c *Client) dispatch(msgType string, raw json.RawMessage) {
 		select {
 		case c.pingChan <- true:
 		default:
+		}
+	case TypePrinterList:
+		var m PrinterListMsg
+		if err := json.Unmarshal(raw, &m); err == nil {
+			c.hub.ResolvePrinterList(m.RequestID, m.Printers)
 		}
 	default:
 		slog.Warn("tipo de mensaje desconocido", "type", msgType, "terminal_id", c.terminalID)

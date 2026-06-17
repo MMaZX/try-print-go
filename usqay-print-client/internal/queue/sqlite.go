@@ -4,6 +4,7 @@ package queue
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     id              TEXT PRIMARY KEY,
     payload         TEXT NOT NULL,
     tipo_documento  TEXT NOT NULL DEFAULT 'comanda',
+    impresora_id    TEXT NOT NULL DEFAULT '',
     estado          TEXT NOT NULL DEFAULT 'PENDING',
     error_msg       TEXT,
     created_at      DATETIME NOT NULL,
@@ -34,5 +36,16 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("ejecutar migración de schema: %w", err)
 	}
+
+	// Add impresora_id column to existing databases created before this migration.
+	// SQLite does not support ADD COLUMN IF NOT EXISTS, so we ignore the
+	// "duplicate column name" error that fires when the column already exists.
+	if _, err := db.Exec(`ALTER TABLE print_jobs ADD COLUMN impresora_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrar columna impresora_id: %w", err)
+		}
+	}
+
 	return db, nil
 }

@@ -94,6 +94,19 @@ El cliente carga `config.json` al arrancar. Si no existe, termina con un error c
 
 ---
 
+## Regla de Colaboración
+
+### Preguntar antes de actuar
+
+Ante cualquier instrucción ambigua o que implique cambios en múltiples archivos, **siempre preguntar** antes de escribir código. No asumir la intención del usuario.
+
+Ejemplos obligatorios de cuestionamiento previo:
+- Si una indicación implica un nuevo componente o puerto ("el cliente necesita puerto X") → preguntar para qué lo usará.
+- Si se pide eliminar algo ("eliminar tokens") → confirmar qué exactamente se elimina y si hay side effects.
+- Si el scope no está claro → acotar antes de implementar.
+
+---
+
 ## Skills instaladas
 
 Estas skills están instaladas globalmente y deben cargarse antes de escribir código según el contexto:
