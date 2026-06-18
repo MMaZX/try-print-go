@@ -9,7 +9,7 @@ services:
       GOOS: linux
       GOARCH: amd64
       CGO_ENABLED: "0"
-    command: go build -o build/usqay-print-server ./cmd/server
+    command: sh -c "mkdir -p build && go build -o build/usqay-print-server ./cmd/server"
 
   client-linux-build:
     image: golang:latest
