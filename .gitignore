@@ -33,12 +33,8 @@ go.work.sum
 # Local builds & binary outputs
 build/
 bin/
-client
-server
 usqay-print-client/build/
-usqay-print-client/client
 usqay-print-server/build/
-usqay-print-server/server
 
 # Local database and logs
 agent.db
