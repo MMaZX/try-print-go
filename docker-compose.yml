@@ -1,0 +1,39 @@
+services:
+  server-build:
+    image: golang:latest
+    working_dir: /src
+    volumes:
+      - ./usqay-print-server:/src
+      - gomod-cache:/go/pkg/mod
+    environment:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    command: go build -o build/usqay-print-server ./cmd/server
+
+  client-linux-build:
+    image: golang:latest
+    working_dir: /src
+    volumes:
+      - ./usqay-print-client:/src
+      - gomod-cache:/go/pkg/mod
+    environment:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    command: sh -c "mkdir -p build/linux && go build -o build/linux/usqay-print-client ./cmd/client"
+
+  client-windows-build:
+    image: golang:latest
+    working_dir: /src
+    volumes:
+      - ./usqay-print-client:/src
+      - gomod-cache:/go/pkg/mod
+    environment:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    command: sh -c "mkdir -p build/windows && go build -o build/windows/usqay-print-client.exe ./cmd/client"
+
+volumes:
+  gomod-cache:
