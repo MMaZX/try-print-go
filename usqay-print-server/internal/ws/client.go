@@ -222,7 +222,7 @@ func (c *Client) handleRegister(tokens map[string]string) error {
 		"version":     reg.Version,
 	})
 
-	slog.Info("terminal autenticado", "terminal_id", terminalID, "business_id", businessID, "impresoras", len(printers))
+	slog.Info("terminal autenticado", slog.String("kind", "ok"), "terminal_id", terminalID, "business_id", businessID, "impresoras", len(printers))
 	return nil
 }
 
@@ -313,7 +313,7 @@ func (c *Client) dispatch(msgType string, raw json.RawMessage) {
 		var m SyncMsg
 		if err := json.Unmarshal(raw, &m); err == nil {
 			c.hub.HandleSync(c.terminalID, m.PrintedJobs, c)
-			slog.Info("sync recibido", "terminal_id", c.terminalID, "trabajos_impresos", len(m.PrintedJobs))
+			slog.Info("sync recibido", slog.String("kind", "ok"), "terminal_id", c.terminalID, "trabajos_impresos", len(m.PrintedJobs))
 		}
 	case TypePing:
 		c.Send(PongMsg{Type: TypePong})

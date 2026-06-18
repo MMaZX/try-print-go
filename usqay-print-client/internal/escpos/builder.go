@@ -76,5 +76,49 @@ func (b *Builder) Separator(width int) *Builder {
 // Cut appends a partial paper cut command.
 func (b *Builder) Cut() *Builder { return b.raw(cmdCutPartial) }
 
+// Drawer sends a cash drawer opening pulse.
+func (b *Builder) Drawer() *Builder {
+	return b.raw([]byte{0x1B, 0x70, 0x00, 0x19, 0xFA})
+}
+
+// Size sets character size. Supported values: "normal", "medium" (double height), "double" (double height + width).
+func (b *Builder) Size(size string) *Builder {
+	switch size {
+	case "double":
+		return b.raw([]byte{0x1D, 0x21, 0x11})
+	case "medium":
+		return b.raw([]byte{0x1D, 0x21, 0x01})
+	default:
+		return b.raw([]byte{0x1D, 0x21, 0x00})
+	}
+}
+
+// QR prints a native ESC/POS QR code.
+func (b *Builder) QR(data string, size int) *Builder {
+	if data == "" {
+		return b
+	}
+	if size < 1 {
+		size = 6
+	} else if size > 16 {
+		size = 16
+	}
+	// 1. Select Model 2
+	b.raw([]byte{0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00})
+	// 2. Set size
+	b.raw([]byte{0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, byte(size)})
+	// 3. Set EC level M
+	b.raw([]byte{0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x44, 49})
+	// 4. Store data
+	length := len(data) + 3
+	pL := byte(length & 0xFF)
+	pH := byte((length >> 8) & 0xFF)
+	b.raw([]byte{0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 48})
+	b.raw([]byte(data))
+	// 5. Print
+	b.raw([]byte{0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 48})
+	return b
+}
+
 // Bytes returns the accumulated ESC/POS byte sequence.
 func (b *Builder) Bytes() []byte { return b.buf }

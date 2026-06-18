@@ -122,7 +122,7 @@ func (m *MonitorClient) handleAuth() error {
 	}
 
 	m.authenticated = true
-	slog.Info("monitor autenticado exitosamente")
+	slog.Info("monitor autenticado exitosamente", slog.String("kind", "ok"))
 	return nil
 }
 

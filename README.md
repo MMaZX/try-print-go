@@ -2,7 +2,7 @@
 
 Agente de impresión térmica distribuida para restaurantes.
 
-Arquitectura: `Go + WebSocket + SQLite local + ESC/POS`
+Stack: `Go + WebSocket + SQLite local + ESC/POS`
 
 ---
 
@@ -27,7 +27,7 @@ usqay-print-client/   → agente local instalado en cada PC del restaurante
 ┌─────────────────────────────────────┐
 │         Backend Laravel             │
 │                                     │
-│  POST /api/tenant/print → servidor  │
+│  POST /api/v1/jobs      → servidor  │
 │  POST /agents/validate  ← servidor  │
 └──────────────┬──────────────────────┘
                │ HTTP interno (X-Internal-Token)
@@ -51,7 +51,7 @@ usqay-print-client/   → agente local instalado en cada PC del restaurante
 │                                      │
 │  • SQLite local (agent.db)           │
 │  • Registry de impresoras en memoria │
-│  • Worker de impresión multi-printer │
+│  • Worker de impresión               │
 │  • Reconexión automática con backoff │
 └──────────────┬───────────────────────┘
                │ TCP (RED) / Spooler OS (USB/SERIE)
@@ -66,19 +66,19 @@ usqay-print-client/   → agente local instalado en cada PC del restaurante
 ### 1. Conexión del agente
 
 ```
-Cliente se conecta al servidor con solo el token
+Cliente conecta al servidor con su token
         ↓
-Servidor llama a Laravel:
+Servidor valida el token contra Laravel:
   POST /api/tenant/print-configuration/agents/validate
   { "token": "agt_xxx" }
         ↓
 Laravel responde:
   { valid: true, terminal_id: "15", business_id: "uuid", printers: [...] }
         ↓
-Servidor envía al cliente:
+Servidor envía al cliente su configuración:
   { type: "config", terminal_id: "15", printers: [{id, tipo, addr}, ...] }
         ↓
-Cliente puebla su registry de impresoras en memoria
+Cliente carga las impresoras en su registry en memoria
 ```
 
 ### 2. Ciclo de impresión
@@ -89,27 +89,19 @@ Backend Laravel crea trabajo de impresión
 Servidor envía por WebSocket:
   { type: "print", job_id, tipo_documento, impresora_name_id, payload }
         ↓
-Cliente recibe → guarda en SQLite { estado: PENDING, impresora_id }
+[CLIENTE] recibe → guarda en SQLite { estado: PENDING }
         ↓
-Cliente responde: { type: "received", job_id }   ← ACK inmediato
+[CLIENTE] responde: { type: "received", job_id }   ← ACK inmediato
         ↓
-Worker local: PENDING → PROCESSING → resuelve impresora → imprime → PRINTED
+[WORKER] cada 500ms: PENDING → PROCESSING → imprime → PRINTED
         ↓
-Cliente notifica: { type: "printed", job_id }
+[CLIENTE] notifica: { type: "printed", job_id }
         ↓
 Servidor llama a Laravel:
   PUT /api/tenant/print-configuration/queue/{id}/status  { estado: "IMPRESO" }
 ```
 
-Si se cae la conexión: los trabajos recibidos siguen en SQLite y se imprimen. Al reconectar, el cliente envía sync con los IDs ya impresos y vuelve a recibir su config de impresoras.
-
----
-
-## Requisitos
-
-- **Go 1.21+**
-- **Windows:** no requiere ninguna dependencia extra (binario único, sin CGO)
-- **Linux:** `lp` / CUPS instalado para impresoras USB/SERIE; impresoras RED no requieren nada
+Si la conexión cae: los trabajos guardados en SQLite siguen procesándose. Al reconectar, el cliente envía un `sync` con los IDs ya impresos para que el servidor actualice Laravel.
 
 ---
 
@@ -133,14 +125,12 @@ Si se cae la conexión: los trabajos recibidos siguen en SQLite y se imprimen. A
 | `laravel_base_url` | URL base del backend Laravel |
 | `internal_token` | Secreto compartido entre servidor y Laravel (`X-Internal-Token`) |
 
-> **Modo local (dev sin Laravel):** si `laravel_base_url` está vacío y se define `tokens` como mapa `terminal_id → token`, el servidor valida localmente. Si ambos están vacíos, acepta cualquier conexión (modo abierto para pruebas).
-
 ### Cliente — `usqay-print-client/config.json`
 
 ```json
 {
   "server_url": "ws://localhost:8090/ws",
-  "token": "agt_UPn0WkUtePvN2YMt35BkXCgGUfEQr08i0dVqONuaoIWpzqho",
+  "token": "agt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "log_level": "info"
 }
 ```
@@ -148,14 +138,28 @@ Si se cae la conexión: los trabajos recibidos siguen en SQLite y se imprimen. A
 | Campo | Descripción |
 |---|---|
 | `server_url` | URL WebSocket del servidor (`ws://` o `wss://`) |
-| `token` | Token del agente generado en el panel de Laravel |
-| `log_level` | `debug` / `info` / `warn` / `error` (opcional, default: `info`) |
+| `token` | Token del agente generado desde el panel de Laravel |
+| `log_level` | `debug` / `info` / `warn` / `error` (opcional, default `info`) |
 
 > La configuración de impresoras **no va en config.json**. El servidor la entrega automáticamente tras validar el token.
 
+### Cómo obtener el token del agente
+
+El token lo genera Laravel al registrar una terminal desde el panel:
+
+```
+POST /api/tenant/print-configuration/agents/add
+Authorization: Bearer <JWT del usuario>
+{ "terminal_id": 1 }
+
+→ { "success": true, "data": { "terminal_id": 1, "token": "agt_xxx..." } }
+```
+
+Ese `agt_xxx...` va al campo `token` del `config.json` del cliente. Laravel solo muestra el token una vez — después guarda únicamente su hash SHA-256.
+
 ### Impresoras — vienen del servidor
 
-El servidor envía la lista de impresoras del sucursal en el mensaje `config` tras conectar:
+El servidor entrega la lista al cliente en el mensaje `config` tras conectar:
 
 ```json
 {
@@ -171,7 +175,7 @@ El servidor envía la lista de impresoras del sucursal en el mensaje `config` tr
 
 | `tipo` | Mecanismo | `addr` |
 |---|---|---|
-| `RED` | TCP socket directo → ESC/POS raw | `IP:9100` |
+| `RED` | TCP socket directo → ESC/POS raw | `IP:puerto` (ej: `192.168.1.100:9100`) |
 | `USB` | Windows Spooler / CUPS | nombre del driver en el OS |
 | `SERIE` | Windows Spooler / CUPS | nombre del driver en el OS |
 
@@ -192,90 +196,132 @@ go build -o build/usqay-print-client ./cmd/client
 GOOS=windows GOARCH=amd64 go build -o build/usqay-print-client.exe ./cmd/client
 ```
 
----
-
-## Ejecución
-
-### 1. Iniciar el servidor
+O con los scripts de la raíz:
 
 ```bash
-cd usqay-print-server/build
-./usqay-print-server
-# → level=INFO msg="usqay-print-server iniciado" addr=:8090
-```
-
-### 2. Iniciar el cliente (en la PC del restaurante)
-
-```bash
-cd usqay-print-client/build
-./usqay-print-client
-# → level=INFO msg="usqay-print-client iniciado"
-# → level=INFO msg="conectando al servidor" url=ws://...
-# → level=INFO msg="registrado con el servidor"
-# → level=INFO msg="configuración aplicada" terminal_id=15 impresoras=2
-# → level=INFO msg="worker iniciado"
-```
-
-### 3. Listar impresoras del OS disponibles
-
-```bash
-./usqay-print-client -list
-# → Impresoras disponibles:
-# →   - Epson TM-T20 Receipt
-# →   - Microsoft Print to PDF
+./server.sh   # build + ejecuta el servidor
+./client.sh   # build + ejecuta el cliente
 ```
 
 ---
 
-## Pruebas
+## Binario del servidor (`usqay-print-server`)
 
-### End-to-end con Laravel
+### Endpoints WebSocket
+
+| Ruta | Descripción |
+|---|---|
+| `GET /ws` | Conexión de agentes de impresión |
+| `GET /ws/agent` | Alias de `/ws` |
+| `GET /ws/monitor` | Conexión de monitores web (browsers) |
+
+### API REST — requieren `X-Internal-Token`
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/jobs` | Laravel despacha un nuevo trabajo de impresión |
+| `PUT` | `/api/v1/jobs/{job_id}/status` | Actualiza el estado de un trabajo |
+| `POST` | `/api/v1/agents/{terminal_id}/config-refresh` | Ordena al agente reconectar y recargar su config |
+| `GET` | `/api/v1/agents` | Lista todos los agentes conectados actualmente |
+| `GET` | `/api/v1/agents/{terminal_id}/status` | Estado de un agente específico |
+| `GET` | `/api/v1/agents/{terminal_id}/printers` | Solicita al agente las impresoras del OS disponibles |
+| `POST` | `/api/v1/agents/{terminal_id}/kick` | Desconecta forzadamente un agente |
+
+### API REST — sin autenticación (desarrollo / testing)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/print` | Crea un trabajo de prueba sin pasar por Laravel |
+| `GET` | `/api/status` | Estado general: terminales conectadas y trabajos en curso |
+
+**Ejemplo — crear trabajo de prueba:**
 
 ```bash
-# Enviar un trabajo desde Laravel al servidor Go, que lo despacha al cliente
-curl -X POST http://localhost:8090/api/jobs \
+curl -X POST http://localhost:8090/api/print \
   -H "Content-Type: application/json" \
-  -H "X-Internal-Token: token-interno-compartido" \
   -d '{
     "terminal_id": "15",
-    "impresora_name_id": "uuid-de-impresora",
     "tipo_documento": "comanda",
     "payload": {
-      "mesa": 8,
+      "mesa": 3,
       "items": [
-        {"nombre": "Ceviche",       "cantidad": 2, "precio": 28.00},
-        {"nombre": "Chicha Morada", "cantidad": 2, "precio": 5.00}
+        {"nombre": "Lomo Saltado",    "cantidad": 2, "precio": 21.00},
+        {"nombre": "Inca Kola 500ml", "cantidad": 2, "precio": 4.00}
       ]
     }
   }'
 ```
 
-### Prueba local de impresión (-insert)
+**Ejemplo — crear trabajo desde Laravel (con auth):**
 
 ```bash
-cd usqay-print-client
-
-# Insertar trabajo de prueba directo en SQLite
-go run ./cmd/client -insert
-
-# El worker lo detecta en <500ms e imprime (requiere que el registry
-# tenga al menos una impresora, es decir, que el cliente esté conectado)
-
-# Verificar en SQLite:
-sqlite3 build/agent.db "SELECT id, tipo_documento, impresora_id, estado FROM print_jobs;"
+curl -X POST http://localhost:8090/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Token: token-interno-compartido" \
+  -d '{
+    "job_id": "123",
+    "terminal_id": "15",
+    "impresora_name_id": "uuid-de-impresora",
+    "documento_slug": "comanda",
+    "payload": { "mesa": 8, "items": [] },
+    "expira_en": 300
+  }'
 ```
 
-### Prueba de caída de conexión
+---
+
+## Binario del cliente (`usqay-print-client`)
+
+### Flags disponibles
 
 ```bash
-# 1. Iniciar servidor + cliente
-# 2. Enviar un trabajo → cliente lo guarda en SQLite
-# 3. Matar el servidor (Ctrl+C)
-# 4. El worker sigue imprimiendo con los trabajos ya guardados
-# 5. Reiniciar el servidor
-# 6. El cliente reconecta automáticamente con backoff (1s → 2s → 4s → … → 60s)
-# 7. El cliente envía sync con los IDs ya impresos
-# 8. El servidor actualiza sus registros en Laravel
+./usqay-print-client              # modo normal — conecta y procesa trabajos
+./usqay-print-client -list        # lista impresoras del OS y sale
+./usqay-print-client -insert      # inserta un trabajo de prueba en SQLite y sale
+```
+
+### Logs en consola
+
+Los logs salen con colores y etiquetas de origen para facilitar el soporte:
+
+```
+15:04:05 INFO  [CLIENTE] usqay-print-client iniciado
+15:04:05 INFO  [CLIENTE] base de datos abierta  path=./agent.db
+15:04:05 INFO  [CLIENTE] conectando al servidor  url=ws://...
+15:04:05 INFO  [WORKER]  worker iniciado  intervalo=500ms
+15:04:05 INFO  [CLIENTE] sync enviado  trabajos_impresos_locales=0
+15:04:05 INFO  [SERVER]  configuración aplicada  terminal_id=15 impresoras=2
+```
+
+Cuando llega y se procesa un trabajo:
+
+```
+15:04:10 INFO  [SERVER]  trabajo de impresión recibido  job_id=abc123 tipo=comanda
+15:04:10 INFO  [WORKER]  procesando trabajo  job_id=abc123 tipo=comanda impresora_id=uuid
+15:04:10 INFO  [WORKER]  impresión exitosa  job_id=abc123 duracion=142ms
+```
+
+| Etiqueta | Color | Qué representa |
+|---|---|---|
+| `[CLIENTE]` | verde | Conexión WebSocket, handshake, reconexión |
+| `[SERVER]` | azul | Mensajes y órdenes recibidas del servidor |
+| `[WORKER]` | magenta | Procesamiento e impresión física local |
+
+El archivo de log diario (`logs/YYYY-MM-DD.log`) se escribe sin colores ANSI.
+
+### Archivos que genera el cliente
+
+```
+build/
+├── usqay-print-client      ← binario
+├── config.json             ← configuración
+├── agent.db                ← SQLite con la cola local de trabajos
+└── logs/
+    ├── 2026-06-17.log      ← log del día (texto plano)
+    └── archive/
+        └── 2026/
+            └── mayo/
+                └── 2026-mayo.zip   ← logs del mes anterior (comprimidos al iniciar)
 ```
 
 ---
@@ -285,20 +331,20 @@ sqlite3 build/agent.db "SELECT id, tipo_documento, impresora_id, estado FROM pri
 ### Cliente → Servidor
 
 ```json
-// Registro inicial — solo token, sin terminal_id
+// Registro — solo el token, sin terminal_id
 { "type": "register", "token": "agt_xxx", "version": "1.0.3" }
 
-// Sincronización de trabajos ya impresos (enviado junto al registro)
+// Sincronización al reconectar (IDs impresos localmente desde la última sesión)
 { "type": "sync", "printed_jobs": ["id1", "id2"] }
 
-// ACK de recepción (inmediato al recibir el trabajo)
+// ACK de recepción (inmediato, antes de imprimir)
 { "type": "received", "job_id": "abc123" }
 
-// Confirmación de impresión exitosa
+// Confirmación de impresión física exitosa
 { "type": "printed", "job_id": "abc123" }
 
-// Reporte de error de impresión
-{ "type": "error", "job_id": "abc123", "msg": "impresora no disponible" }
+// Reporte de fallo de impresión
+{ "type": "error", "job_id": "abc123", "msg": "sin papel" }
 
 // Heartbeat (cada 30s)
 { "type": "ping" }
@@ -307,7 +353,7 @@ sqlite3 build/agent.db "SELECT id, tipo_documento, impresora_id, estado FROM pri
 ### Servidor → Cliente
 
 ```json
-// Configuración inicial: identidad + impresoras disponibles
+// Configuración inicial: identidad + impresoras del sucursal
 {
   "type": "config",
   "terminal_id": "15",
@@ -328,21 +374,21 @@ sqlite3 build/agent.db "SELECT id, tipo_documento, impresora_id, estado FROM pri
 // Respuesta al heartbeat
 { "type": "pong" }
 
-// Solicitud de reconexión (cuando cambia la config en el panel)
+// Config del panel cambió — reconectar para obtener la nueva config
 { "type": "config_refresh" }
 
-// Cuando una nueva instancia desplaza a esta conexión
+// Esta terminal fue desplazada por una conexión más reciente
 { "type": "kick", "reason": "nueva conexión registrada" }
 ```
 
 ---
 
-## Estados de un trabajo (SQLite cliente)
+## Estados de un trabajo (SQLite del cliente)
 
 ```
 PENDING     → recibido del servidor, guardado en SQLite
-PROCESSING  → worker lo tomó
-PRINTED     → impresión física confirmada por el OS/impresora
+PROCESSING  → worker lo tomó y está enviando a la impresora
+PRINTED     → impresión física confirmada
 ERROR       → fallo (el worker continúa con el siguiente trabajo)
 ```
 
@@ -350,23 +396,21 @@ ERROR       → fallo (el worker continúa con el siguiente trabajo)
 
 ## Endpoints de Laravel requeridos por el servidor
 
-El servidor Go llama a estos endpoints. Todos van protegidos con `X-Internal-Token`.
+El servidor Go llama a estos endpoints. Todos van con `X-Internal-Token`.
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/api/tenant/print-configuration/agents/validate` | Valida token y devuelve `terminal_id` + `printers` |
+| `POST` | `/api/tenant/print-configuration/agents/validate` | Valida token del agente y devuelve `terminal_id` + `printers` |
 | `PUT` | `/api/tenant/print-configuration/queue/{id}/status` | Actualiza estado de un trabajo |
 | `POST` | `/api/tenant/print-configuration/monitor-token/validate` | Valida token del monitor web |
 
-### `POST /agents/validate` — contrato
+**Contrato de `/agents/validate`**
 
-Request body:
 ```json
+// Request
 { "token": "agt_xxx" }
-```
 
-Response esperada:
-```json
+// Response
 {
   "valid": true,
   "terminal_id": "15",
@@ -379,18 +423,11 @@ Response esperada:
 
 ---
 
-## Logs
+## Requisitos
 
-Cada binario escribe logs en `logs/` junto al ejecutable.
-
-```
-logs/
-├── 2026-06-16.log          ← día actual
-└── archive/
-    └── 2026/
-        └── mayo/
-            └── 2026-mayo.zip   ← logs del mes anterior (comprimidos al iniciar)
-```
+- **Go 1.21+**
+- **Windows:** binario único sin dependencias extra (sin CGO)
+- **Linux:** `lp` / CUPS instalado para impresoras USB/SERIE; impresoras RED no requieren nada
 
 ---
 

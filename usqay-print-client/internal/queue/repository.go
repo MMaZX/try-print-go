@@ -2,9 +2,14 @@ package queue
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// ErrDuplicate is returned by Insert when the job ID already exists in the local queue.
+var ErrDuplicate = errors.New("trabajo duplicado")
 
 // Estado represents the lifecycle state of a print job.
 type Estado string
@@ -39,6 +44,7 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 // Insert persists a new job with state PENDING.
+// Returns ErrDuplicate (via errors.Is) when the job ID already exists.
 func (r *Repository) Insert(job PrintJob) error {
 	_, err := r.db.Exec(
 		`INSERT INTO print_jobs (id, payload, tipo_documento, impresora_id, estado, created_at, updated_at)
@@ -46,7 +52,24 @@ func (r *Repository) Insert(job PrintJob) error {
 		job.ID, job.Payload, job.TipoDocumento, job.ImpresoraID, EstadoPending, job.CreatedAt, job.UpdatedAt,
 	)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return fmt.Errorf("insertar trabajo %s: %w", job.ID, ErrDuplicate)
+		}
 		return fmt.Errorf("insertar trabajo %s: %w", job.ID, err)
+	}
+	return nil
+}
+
+// Upsert replaces an existing job (or inserts a new one) resetting it to PENDING.
+// Used for reprints where the server explicitly requests re-processing.
+func (r *Repository) Upsert(job PrintJob) error {
+	_, err := r.db.Exec(
+		`INSERT OR REPLACE INTO print_jobs (id, payload, tipo_documento, impresora_id, estado, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		job.ID, job.Payload, job.TipoDocumento, job.ImpresoraID, EstadoPending, job.CreatedAt, job.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert trabajo %s: %w", job.ID, err)
 	}
 	return nil
 }

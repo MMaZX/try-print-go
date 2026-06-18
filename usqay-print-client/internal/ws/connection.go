@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -202,14 +203,14 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 	case TypeConfig:
 		var msg ConfigMsg
 		if err := json.Unmarshal(raw, &msg); err != nil {
-			slog.Error("error parseando config", "error", err)
+			slog.Error("error parseando config", "src", "SERVER", "error", err)
 			return
 		}
 		c.applyConfig(msg)
 	case TypePrint:
 		var msg PrintJobMsg
 		if err := json.Unmarshal(raw, &msg); err != nil {
-			slog.Error("error parseando trabajo de impresión", "error", err)
+			slog.Error("error parseando trabajo de impresión", "src", "SERVER", "error", err)
 			return
 		}
 		c.handlePrintJob(msg)
@@ -218,14 +219,14 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 	case TypeListPrinters:
 		var m ListPrintersMsg
 		if err := json.Unmarshal(raw, &m); err != nil {
-			slog.Error("error parseando list_printers", "error", err)
+			slog.Error("error parseando list_printers", "src", "SERVER", "error", err)
 			return
 		}
 		go c.handleListPrinters(m)
 	case TypeKick:
-		slog.Warn("esta terminal fue desplazada por una nueva conexión — reconectando")
+		slog.Warn("esta terminal fue desplazada por una nueva conexión — reconectando", "src", "SERVER")
 	case "config_refresh":
-		slog.Info("petición de config_refresh recibida del servidor, reconectando...")
+		slog.Info("servidor solicitó recargar configuración", "src", "SERVER")
 		_ = wsConn.Close(websocket.StatusNormalClosure, "config_refresh")
 	case "ping":
 		select {
@@ -233,11 +234,13 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 		default:
 		}
 	default:
-		slog.Warn("tipo de mensaje desconocido del servidor", "type", env.Type)
+		slog.Warn("tipo de mensaje desconocido del servidor", "src", "SERVER", "type", env.Type)
 	}
 }
 
 // handlePrintJob persists the job in SQLite and sends an immediate ACK.
+// If msg.Reimpresion is true, replaces any existing record and re-queues for printing.
+// If the job already exists without the reimpresion flag, logs a warning and ACKs silently.
 func (c *Connection) handlePrintJob(msg PrintJobMsg) {
 	now := time.Now().UTC()
 	job := queue.PrintJob{
@@ -250,12 +253,24 @@ func (c *Connection) handlePrintJob(msg PrintJobMsg) {
 		UpdatedAt:     now,
 	}
 
-	if err := c.repo.Insert(job); err != nil {
-		slog.Error("error guardando trabajo en SQLite", "job_id", msg.JobID, "error", err)
-		return
+	if msg.Reimpresion {
+		if err := c.repo.Upsert(job); err != nil {
+			slog.Error("error guardando reimpresión en SQLite", "src", "SERVER", "job_id", msg.JobID, "error", err)
+			return
+		}
+		slog.Info("reimpresión encolada", "src", "SERVER", "job_id", msg.JobID, "tipo", msg.TipoDocumento)
+	} else {
+		if err := c.repo.Insert(job); err != nil {
+			if errors.Is(err, queue.ErrDuplicate) {
+				slog.Warn("trabajo duplicado ignorado — ya existe en cola local", "src", "SERVER", "job_id", msg.JobID)
+			} else {
+				slog.Error("error guardando trabajo en SQLite", "src", "SERVER", "job_id", msg.JobID, "error", err)
+				return
+			}
+		} else {
+			slog.Info("trabajo de impresión recibido", "src", "SERVER", "job_id", msg.JobID, "tipo", msg.TipoDocumento)
+		}
 	}
-	slog.Info("trabajo recibido y guardado en SQLite",
-		"job_id", msg.JobID, "tipo", msg.TipoDocumento)
 
 	// ACK immediately — the worker will handle the actual printing asynchronously.
 	select {
@@ -287,30 +302,43 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 	for _, spec := range msg.Printers {
 		p := buildPrinterFromSpec(spec)
 		if p == nil {
-			slog.Warn("tipo de impresora desconocido, ignorado", "id", spec.ID, "tipo", spec.Tipo)
+			slog.Warn("tipo de impresora desconocido, ignorado", "src", "SERVER", "id", spec.ID, "tipo", spec.Tipo)
 			continue
 		}
 		c.registry.Set(spec.ID, p)
+		slog.Info("impresora registrada",
+			"src", "SERVER",
+			"id", spec.ID,
+			"tipo", spec.Tipo,
+			"addr", spec.Addr,
+			"mode", p.Mode(),
+		)
 		count++
 	}
-	slog.Info("configuración aplicada", "terminal_id", msg.TerminalID, "impresoras", count)
+	if count == 0 {
+		slog.Warn("configuración recibida sin impresoras — trabajos en cola serán retenidos hasta recibir config válida",
+			"src", "SERVER", "terminal_id", msg.TerminalID)
+		return
+	}
+	slog.Info("configuración aplicada", "src", "SERVER", "terminal_id", msg.TerminalID, "impresoras", count)
 }
 
-// handleListPrinters responds to a list_printers request from the server with the OS printer names.
+// handleListPrinters responds to a list_printers request with OS printers and their mode hints.
 func (c *Connection) handleListPrinters(m ListPrintersMsg) {
-	names, err := printer.ListPrinters()
+	infos, err := printer.ListPrinters()
 	if err != nil {
 		slog.Error("error listando impresoras del OS", "error", err)
 	}
-	if names == nil {
-		names = []string{}
+	printers := make([]OsPrinterInfo, 0, len(infos))
+	for _, p := range infos {
+		printers = append(printers, OsPrinterInfo{Name: p.Name, ModeHint: p.ModeHint})
 	}
-	slog.Info("respondiendo lista de impresoras", "request_id", m.RequestID, "count", len(names))
+	slog.Info("respondiendo lista de impresoras", "src", "SERVER", "request_id", m.RequestID, "count", len(printers))
 	select {
 	case c.outgoing <- outMsg{data: PrinterListMsg{
 		Type:      TypePrinterList,
 		RequestID: m.RequestID,
-		Printers:  names,
+		Printers:  printers,
 	}}:
 	default:
 		slog.Warn("printer_list descartado (canal lleno)", "request_id", m.RequestID)
@@ -318,7 +346,11 @@ func (c *Connection) handleListPrinters(m ListPrintersMsg) {
 }
 
 // buildPrinterFromSpec maps a PrinterSpec received from the server to a live Printer.
+// Network printers are always ESC/POS (raw TCP port 9100).
+// System printers use the mode from the server config; empty defaults to "escpos"
+// for backward compatibility with configs that predate the mode field.
 func buildPrinterFromSpec(spec PrinterSpec) printer.Printer {
+	escpos := spec.Mode != "text"
 	switch spec.Tipo {
 	case "RED":
 		if spec.Addr == "" {
@@ -329,7 +361,7 @@ func buildPrinterFromSpec(spec PrinterSpec) printer.Printer {
 		if spec.Addr == "" {
 			return nil
 		}
-		return printer.NewSystemPrinter(spec.Addr)
+		return printer.NewSystemPrinter(spec.Addr, escpos)
 	default:
 		return nil
 	}

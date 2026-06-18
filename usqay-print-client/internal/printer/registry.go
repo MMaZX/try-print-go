@@ -53,3 +53,14 @@ func (r *Registry) Len() int {
 	defer r.mu.RUnlock()
 	return len(r.store)
 }
+
+// IDs returns all registered printer IDs.
+func (r *Registry) IDs() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := make([]string, 0, len(r.store))
+	for id := range r.store {
+		ids = append(ids, id)
+	}
+	return ids
+}

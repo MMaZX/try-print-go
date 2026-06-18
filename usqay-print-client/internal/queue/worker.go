@@ -34,11 +34,11 @@ func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	slog.Info("worker iniciado", "intervalo", pollInterval)
+	slog.Info("worker iniciado", "src", "WORKER", "intervalo", pollInterval)
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("worker detenido")
+			slog.Info("worker detenido", "src", "WORKER")
 			return
 		case <-ticker.C:
 			w.processNext()
@@ -49,7 +49,7 @@ func (w *Worker) Run(ctx context.Context) {
 func (w *Worker) processNext() {
 	job, err := w.repo.NextPending()
 	if err != nil {
-		slog.Error("error consultando trabajo pendiente", "error", err)
+		slog.Error("error consultando trabajo pendiente", "src", "WORKER", "error", err)
 		return
 	}
 	if job == nil {
@@ -58,27 +58,40 @@ func (w *Worker) processNext() {
 
 	// Wait for the server to deliver printer configuration before processing.
 	if w.registry.Len() == 0 {
+		slog.Debug("registro de impresoras vacío, esperando config del servidor", "src", "WORKER", "job_id", job.ID)
 		return
 	}
 
 	p, ok := w.registry.Resolve(job.ImpresoraID)
 	if !ok {
-		slog.Error("impresora no encontrada en registro",
-			"job_id", job.ID, "impresora_id", job.ImpresoraID)
+		slog.Error("la impresora_id del trabajo no está en la configuración enviada por el servidor para este terminal",
+			"src", "WORKER",
+			"job_id", job.ID,
+			"impresora_id", job.ImpresoraID,
+			"impresoras_configuradas", w.registry.IDs(),
+		)
 		w.finalize(job.ID, EstadoError, "impresora_id no registrada: "+job.ImpresoraID)
 		return
 	}
 
-	slog.Info("procesando trabajo", "job_id", job.ID, "tipo", job.TipoDocumento, "impresora_id", job.ImpresoraID)
+	slog.Info("procesando trabajo",
+		"src", "WORKER", "job_id", job.ID, "tipo", job.TipoDocumento, "impresora_id", job.ImpresoraID)
 
 	if err := w.repo.UpdateStatus(job.ID, EstadoProcessing, ""); err != nil {
-		slog.Error("error actualizando a PROCESSING", "job_id", job.ID, "error", err)
+		slog.Error("error actualizando a PROCESSING", "src", "WORKER", "job_id", job.ID, "error", err)
 		return
 	}
 
-	data, renderErr := render(job.TipoDocumento, job.Payload)
+	// Choose ESC/POS or plain-text renderer based on the printer's mode.
+	var data []byte
+	var renderErr error
+	if p.Mode() == "text" {
+		data, renderErr = renderText(job.TipoDocumento, job.Payload)
+	} else {
+		data, renderErr = render(job.TipoDocumento, job.Payload)
+	}
 	if renderErr != nil {
-		slog.Error("error renderizando payload", "job_id", job.ID, "error", renderErr)
+		slog.Error("error renderizando payload", "src", "WORKER", "job_id", job.ID, "error", renderErr)
 		w.finalize(job.ID, EstadoError, renderErr.Error())
 		return
 	}
@@ -88,12 +101,12 @@ func (w *Worker) processNext() {
 	duration := time.Since(start)
 
 	if printErr != nil {
-		slog.Error("fallo de impresión", "job_id", job.ID, "error", printErr, "duracion", duration)
+		slog.Error("fallo de impresión", "src", "WORKER", "job_id", job.ID, "error", printErr, "duracion", duration)
 		w.finalize(job.ID, EstadoError, printErr.Error())
 		return
 	}
 
-	slog.Info("impresión exitosa", "job_id", job.ID, "duracion", duration)
+	slog.Info("impresión exitosa", "src", "WORKER", "job_id", job.ID, "duracion", duration)
 	w.finalize(job.ID, EstadoPrinted, "")
 }
 

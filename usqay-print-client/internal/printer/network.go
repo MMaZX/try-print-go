@@ -20,6 +20,9 @@ func NewNetworkPrinter(addr string) *NetworkPrinter {
 	return &NetworkPrinter{addr: addr, timeout: defaultTimeout}
 }
 
+// Mode always returns "escpos" — network printers talk raw ESC/POS on port 9100.
+func (p *NetworkPrinter) Mode() string { return "escpos" }
+
 func (p *NetworkPrinter) Print(data []byte) error {
 	conn, err := net.DialTimeout("tcp", p.addr, p.timeout)
 	if err != nil {

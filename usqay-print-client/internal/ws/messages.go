@@ -27,8 +27,8 @@ type Envelope struct {
 // --- Client → Server ---
 
 // RegisterMsg is the first message sent on every (re)connection.
-// The server derives the terminal identity from the token; the client
-// does not need to supply terminal_id.
+// The server derives the terminal identity from the token via Laravel;
+// the client does not send terminal_id.
 type RegisterMsg struct {
 	Type    string `json:"type"`
 	Token   string `json:"token"`
@@ -53,9 +53,16 @@ type SyncMsg struct {
 
 // PrinterSpec describes a physical printer pushed by the server in ConfigMsg.
 type PrinterSpec struct {
-	ID   string `json:"id"`   // UUID from impresoras table; matches ImpresoraNameID in print jobs
-	Tipo string `json:"tipo"` // "RED" | "USB" | "SERIE"
-	Addr string `json:"addr"` // IP:port for RED; OS printer name for USB/SERIE
+	ID   string `json:"id"`             // UUID from impresoras table
+	Tipo string `json:"tipo"`           // "RED" | "USB" | "SERIE"
+	Addr string `json:"addr"`           // IP:port for RED; OS printer name for USB/SERIE
+	Mode string `json:"mode,omitempty"` // "escpos" | "text"; empty defaults to "escpos"
+}
+
+// OsPrinterInfo carries an OS-level printer name and its auto-detected mode hint.
+type OsPrinterInfo struct {
+	Name     string `json:"name"`
+	ModeHint string `json:"mode_hint"` // "escpos" | "text"
 }
 
 // ConfigMsg is sent by the server after successful token validation.
@@ -76,6 +83,7 @@ type PrintJobMsg struct {
 	DocumentoSlug   string          `json:"documento_slug,omitempty"`
 	Payload         json.RawMessage `json:"payload"`
 	ExpiraEn        int             `json:"expira_en,omitempty"`
+	Reimpresion     bool            `json:"reimpresion,omitempty"`
 }
 
 // ListPrintersMsg is sent by the server to request available OS printer names from this agent.
@@ -84,9 +92,9 @@ type ListPrintersMsg struct {
 	RequestID string `json:"request_id"`
 }
 
-// PrinterListMsg is the agent's response carrying OS printer names.
+// PrinterListMsg is the agent's response carrying OS printer info with mode hints.
 type PrinterListMsg struct {
-	Type      string   `json:"type"`
-	RequestID string   `json:"request_id"`
-	Printers  []string `json:"printers"`
+	Type      string          `json:"type"`
+	RequestID string          `json:"request_id"`
+	Printers  []OsPrinterInfo `json:"printers"`
 }

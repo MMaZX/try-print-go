@@ -65,12 +65,18 @@ type SyncMsg struct {
 // --- Server → Client ---
 
 // PrinterSpec describes a physical printer pushed to the agent on connect.
-// ID matches the ImpresoraNameID field that arrives in PrintJobMsg, so the
-// agent can look up connection details at print time without extra round-trips.
 type PrinterSpec struct {
-	ID   string `json:"id"`   // UUID from impresoras table
-	Tipo string `json:"tipo"` // "RED" | "USB" | "SERIE"
-	Addr string `json:"addr"` // IP:port for RED; OS printer name for USB/SERIE
+	ID   string `json:"id"`             // UUID from impresoras table
+	Tipo string `json:"tipo"`           // "RED" | "USB" | "SERIE"
+	Addr string `json:"addr"`           // IP:port for RED; OS printer name for USB/SERIE
+	Mode string `json:"mode,omitempty"` // "escpos" | "text"; empty defaults to "escpos"
+}
+
+// OsPrinterInfo carries an OS-level printer name and its auto-detected mode hint,
+// reported by the agent in response to a list_printers request.
+type OsPrinterInfo struct {
+	Name     string `json:"name"`
+	ModeHint string `json:"mode_hint"` // "escpos" | "text"
 }
 
 // ConfigMsg carries the terminal identity and printer list after registration.
@@ -92,6 +98,7 @@ type PrintJobMsg struct {
 	DocumentoSlug   string          `json:"documento_slug,omitempty"`
 	Payload         json.RawMessage `json:"payload"`
 	ExpiraEn        int             `json:"expira_en,omitempty"`
+	Reimpresion     bool            `json:"reimpresion,omitempty"`
 }
 
 // KickMsg is sent to the previous connection when a new one registers.
@@ -111,9 +118,9 @@ type ListPrintersMsg struct {
 	RequestID string `json:"request_id"`
 }
 
-// PrinterListMsg is the agent's response carrying the OS printer names.
+// PrinterListMsg is the agent's response carrying OS printers with mode hints.
 type PrinterListMsg struct {
-	Type      string   `json:"type"`
-	RequestID string   `json:"request_id"`
-	Printers  []string `json:"printers"`
+	Type      string          `json:"type"`
+	RequestID string          `json:"request_id"`
+	Printers  []OsPrinterInfo `json:"printers"`
 }

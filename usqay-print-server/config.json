@@ -2,5 +2,5 @@
   "port": 8090,
   "log_level": "info",
   "laravel_base_url": "http://127.0.0.1:8001",
-  "internal_token": "mi_token_usqay-print-server-2026-123"
+  "internal_token": "psk_01c4d5b7c32c9dae22bfac877f4182d94b9590dc1e3bff337e80bebadd1d9dbf9139587f8381f6a135e5819396bba559"
 }

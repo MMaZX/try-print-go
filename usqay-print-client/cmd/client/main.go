@@ -45,7 +45,7 @@ func main() {
 	}
 	defer dailyWriter.Close()
 
-	setupLogger(cfg.LogLevel, io.MultiWriter(os.Stdout, dailyWriter))
+	setupLogger(cfg.LogLevel, os.Stdout, dailyWriter)
 
 	if result, err := logging.ArchivePreviousMonthResult(logDir); err != nil {
 		slog.Warn("no se pudo archivar logs del mes anterior", "error", err)
@@ -142,7 +142,7 @@ func buildTestJob() queue.PrintJob {
 	}
 }
 
-func setupLogger(level string, w io.Writer) {
+func setupLogger(level string, console io.Writer, fileW io.Writer) {
 	var l slog.Level
 	switch level {
 	case "debug":
@@ -154,7 +154,9 @@ func setupLogger(level string, w io.Writer) {
 	default:
 		l = slog.LevelInfo
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: l})))
+	consoleH := logging.NewConsoleHandler(console, l)
+	fileH := slog.NewTextHandler(fileW, &slog.HandlerOptions{Level: l})
+	slog.SetDefault(slog.New(logging.NewMultiHandler(consoleH, fileH)))
 }
 
 // resolveExeDir returns the directory of the running executable,

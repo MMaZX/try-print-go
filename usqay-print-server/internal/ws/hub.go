@@ -20,11 +20,13 @@ import (
 type ServerJob struct {
 	ID              string          `json:"id"`
 	TerminalID      string          `json:"terminal_id"`
+	BusinessID      string          `json:"business_id"`
 	ImpresoraNameID string          `json:"impresora_name_id"`
 	Tipo            string          `json:"tipo"`
 	DocumentoSlug   string          `json:"documento_slug"`
 	Payload         json.RawMessage `json:"payload"`
 	ExpiraEn        int             `json:"expira_en"`
+	Reimpresion     bool            `json:"reimpresion"`
 	Estado          string          `json:"estado"` // pendiente|enviado|impreso|error
 	CreatedAt       time.Time       `json:"created_at"`
 }
@@ -53,7 +55,7 @@ type Hub struct {
 	jobs                map[string]*ServerJob   // job_id → job
 	pending             map[string][]*ServerJob // terminal_id → undelivered jobs
 	monitors            map[*MonitorClient]bool // active browser monitors
-	printerListRequests map[string]chan []string // request_id → response channel
+	printerListRequests map[string]chan []OsPrinterInfo // request_id → response channel
 }
 
 // NewHub creates an empty Hub.
@@ -64,7 +66,7 @@ func NewHub(cfg *config.Config) *Hub {
 		jobs:                make(map[string]*ServerJob),
 		pending:             make(map[string][]*ServerJob),
 		monitors:            make(map[*MonitorClient]bool),
-		printerListRequests: make(map[string]chan []string),
+		printerListRequests: make(map[string]chan []OsPrinterInfo),
 	}
 }
 
@@ -95,7 +97,7 @@ func (h *Hub) Register(terminalID string, c *Client) (bool, error) {
 	h.clients[terminalID] = c
 	h.mu.Unlock()
 
-	slog.Info("terminal registrado exitosamente", "terminal_id", terminalID)
+	slog.Info("terminal registrado exitosamente", slog.String("kind", "ok"), "terminal_id", terminalID)
 	return true, nil
 }
 
@@ -114,11 +116,12 @@ func (h *Hub) Unregister(terminalID string, c *Client) {
 // Enqueue creates a new job for the terminal and delivers it if connected,
 // or queues it for delivery on the next connection otherwise.
 func (h *Hub) Enqueue(terminalID, tipoDocumento string, payload json.RawMessage) (*ServerJob, error) {
-	return h.EnqueueLaravel(newJobID(), terminalID, "", "", tipoDocumento, payload, 300)
+	return h.EnqueueLaravel(newJobID(), terminalID, "", "", tipoDocumento, payload, 300, false)
 }
 
 // EnqueueLaravel creates a print job with full Laravel metadata and sends it to the agent.
-func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documentoSlug string, payload json.RawMessage, expiraEn int) (*ServerJob, error) {
+// reimpresion=true instructs the agent to replace an existing job and re-print it.
+func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documentoSlug string, payload json.RawMessage, expiraEn int, reimpresion bool) (*ServerJob, error) {
 	job := &ServerJob{
 		ID:              jobID,
 		TerminalID:      terminalID,
@@ -127,6 +130,7 @@ func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documento
 		DocumentoSlug:   documentoSlug,
 		Payload:         payload,
 		ExpiraEn:        expiraEn,
+		Reimpresion:     reimpresion,
 		Estado:          "pendiente",
 		CreatedAt:       time.Now().UTC(),
 	}
@@ -134,6 +138,9 @@ func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documento
 	h.mu.Lock()
 	h.jobs[job.ID] = job
 	client, connected := h.clients[terminalID]
+	if connected {
+		job.BusinessID = client.businessID
+	}
 	if !connected {
 		h.pending[terminalID] = append(h.pending[terminalID], job)
 	}
@@ -151,6 +158,7 @@ func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documento
 			DocumentoSlug:   job.DocumentoSlug,
 			Payload:         job.Payload,
 			ExpiraEn:        job.ExpiraEn,
+			Reimpresion:     job.Reimpresion,
 		})
 		slog.Info("trabajo enviado por WebSocket", "job_id", job.ID, "terminal_id", terminalID)
 	} else {
@@ -192,8 +200,9 @@ func (h *Hub) FlushPending(terminalID string, c *Client) {
 			DocumentoSlug:   job.DocumentoSlug,
 			Payload:         job.Payload,
 			ExpiraEn:        job.ExpiraEn,
+			Reimpresion:     job.Reimpresion,
 		})
-		slog.Info("trabajo pendiente entregado tras reconexión", "job_id", job.ID, "terminal_id", terminalID)
+		slog.Info("trabajo pendiente entregado tras reconexión", slog.String("kind", "ok"), "job_id", job.ID, "terminal_id", terminalID)
 	}
 }
 
@@ -226,7 +235,7 @@ func (h *Hub) HandleSync(terminalID string, printedIDs []string, c *Client) {
 		"pending_jobs": h.PendingJobsCount(terminalID),
 	})
 
-	slog.Info("sync procesado", "terminal_id", terminalID, "confirmados", len(printedIDs))
+	slog.Info("sync procesado", slog.String("kind", "ok"), "terminal_id", terminalID, "confirmados", len(printedIDs))
 }
 
 // MarkReceived sets the job state to "enviado" (ACK from client).
@@ -269,7 +278,7 @@ func (h *Hub) MarkPrinted(jobID string) {
 	h.mu.Unlock()
 
 	if found {
-		slog.Info("trabajo confirmado como impreso", "job_id", jobID)
+		slog.Info("trabajo confirmado como impreso", slog.String("kind", "ok"), "job_id", jobID)
 		h.broadcastToMonitors(map[string]any{
 			"type":        "job_update",
 			"job_id":      jobID,
@@ -423,7 +432,7 @@ func (h *Hub) RegisterMonitor(m *MonitorClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.monitors[m] = true
-	slog.Info("monitor conectado")
+	slog.Info("monitor conectado", slog.String("kind", "ok"))
 }
 
 // UnregisterMonitor removes a monitor client.
@@ -452,10 +461,26 @@ func (h *Hub) updateLaravelJobStatus(jobID string, estado string, errMsg string)
 		return
 	}
 
+	h.mu.RLock()
+	job, found := h.jobs[jobID]
+	var terminalID, businessID string
+	if found {
+		terminalID = job.TerminalID
+		businessID = job.BusinessID
+	}
+	h.mu.RUnlock()
+
+	if !found {
+		slog.Warn("updateLaravelJobStatus: job no encontrado", "job_id", jobID)
+		return
+	}
+
 	url := fmt.Sprintf("%s/api/tenant/print-configuration/queue/%s/status", h.cfg.LaravelBaseURL, jobID)
 
 	payload := map[string]any{
-		"estado": estado,
+		"estado":      estado,
+		"terminal_id": terminalID,
+		"business_id": businessID,
 	}
 	if errMsg != "" {
 		payload["error"] = errMsg
@@ -492,7 +517,7 @@ func (h *Hub) updateLaravelJobStatus(jobID string, estado string, errMsg string)
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			slog.Error("Laravel devolvió error al actualizar estado", "status", resp.StatusCode, "body", string(bodyBytes))
 		} else {
-			slog.Info("estado actualizado en Laravel", "job_id", jobID, "estado", estado)
+			slog.Info("estado actualizado en Laravel", slog.String("kind", "ok"), "job_id", jobID, "estado", estado)
 		}
 	}()
 }
@@ -541,7 +566,7 @@ func (h *Hub) validateMonitorTokenWithLaravel(token string) (bool, error) {
 
 // RequestPrinterList sends a list_printers request to the connected agent and waits for the response.
 // Returns an error if the terminal is not connected or if the request times out.
-func (h *Hub) RequestPrinterList(terminalID string) ([]string, error) {
+func (h *Hub) RequestPrinterList(terminalID string) ([]OsPrinterInfo, error) {
 	h.mu.RLock()
 	client, online := h.clients[terminalID]
 	h.mu.RUnlock()
@@ -551,7 +576,7 @@ func (h *Hub) RequestPrinterList(terminalID string) ([]string, error) {
 	}
 
 	reqID := newJobID()
-	ch := make(chan []string, 1)
+	ch := make(chan []OsPrinterInfo, 1)
 
 	h.mu.Lock()
 	h.printerListRequests[reqID] = ch
@@ -574,7 +599,7 @@ func (h *Hub) RequestPrinterList(terminalID string) ([]string, error) {
 }
 
 // ResolvePrinterList delivers a printer_list response to its waiting request.
-func (h *Hub) ResolvePrinterList(requestID string, printers []string) {
+func (h *Hub) ResolvePrinterList(requestID string, printers []OsPrinterInfo) {
 	h.mu.Lock()
 	ch, ok := h.printerListRequests[requestID]
 	h.mu.Unlock()
