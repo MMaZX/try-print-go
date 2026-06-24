@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -32,8 +33,12 @@ type Connection struct {
 	cfg        *config.Config
 	repo       *queue.Repository
 	registry   *printer.Registry
-	terminalID string   // set after receiving TypeConfig from the server
+	terminalID string     // set after receiving TypeConfig from the server
 	outgoing   chan outMsg // buffered; written by Notify, drained by writeLoop
+	// pendingRefresh is set to true when the server sends config_refresh so that
+	// the next TypeConfig message is logged with a distinctive banner instead of
+	// the normal startup log.
+	pendingRefresh atomic.Bool
 }
 
 // NewConnection creates a Connection. Call Run in a goroutine to activate it.
@@ -226,7 +231,8 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 	case TypeKick:
 		slog.Warn("esta terminal fue desplazada por una nueva conexión — reconectando", "src", "SERVER")
 	case "config_refresh":
-		slog.Info("servidor solicitó recargar configuración", "src", "SERVER")
+		slog.Info("servidor solicitó recargar configuración — reconectando", "src", "SERVER")
+		c.pendingRefresh.Store(true)
 		_ = wsConn.Close(websocket.StatusNormalClosure, "config_refresh")
 	case "ping":
 		select {
@@ -295,9 +301,19 @@ func (c *Connection) buildSync() (SyncMsg, error) {
 
 // applyConfig populates the printer registry from the ConfigMsg sent by the server.
 // Called each time a TypeConfig message is received (connection and config_refresh).
+// When the cycle was triggered by a config_refresh message the change is logged with
+// a distinctive [CONFIG] banner so it is unmistakable in the log output.
 func (c *Connection) applyConfig(msg ConfigMsg) {
+	isRefresh := c.pendingRefresh.Swap(false)
+
 	c.terminalID = msg.TerminalID
 	c.registry.Clear()
+
+	if isRefresh {
+		slog.Warn("▶ CONFIGURACIÓN ACTUALIZADA POR EL SERVIDOR ◀",
+			"src", "CONFIG", "terminal_id", msg.TerminalID)
+	}
+
 	count := 0
 	for _, spec := range msg.Printers {
 		p := buildPrinterFromSpec(spec)
@@ -315,12 +331,19 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 		)
 		count++
 	}
+
 	if count == 0 {
 		slog.Warn("configuración recibida sin impresoras — trabajos en cola serán retenidos hasta recibir config válida",
 			"src", "SERVER", "terminal_id", msg.TerminalID)
 		return
 	}
-	slog.Info("configuración aplicada", "src", "SERVER", "terminal_id", msg.TerminalID, "impresoras", count)
+
+	if isRefresh {
+		slog.Warn("▶ REFRESH COMPLETADO ◀",
+			"src", "CONFIG", "terminal_id", msg.TerminalID, "impresoras_activas", count)
+	} else {
+		slog.Info("configuración aplicada", "src", "SERVER", "terminal_id", msg.TerminalID, "impresoras", count)
+	}
 }
 
 // handleListPrinters responds to a list_printers request with OS printers and their mode hints.

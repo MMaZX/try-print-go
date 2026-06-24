@@ -20,6 +20,7 @@ const (
 	ansiGreen   = "\033[32;1m"
 	ansiBlue    = "\033[34;1m"
 	ansiMagenta = "\033[35;1m"
+	ansiWhite   = "\033[97;1m"
 )
 
 // ConsoleHandler is a colorized slog.Handler for terminal output.
@@ -158,6 +159,8 @@ func srcColor(src string) string {
 		return ansiBlue
 	case "WORKER":
 		return ansiMagenta
+	case "CONFIG":
+		return ansiWhite
 	default:
 		return ansiGreen
 	}
@@ -170,6 +173,8 @@ func srcLabel(src string) string {
 		return "[SERVER] "
 	case "WORKER":
 		return "[WORKER] "
+	case "CONFIG":
+		return "[CONFIG] "
 	default:
 		return "[CLIENTE]"
 	}
