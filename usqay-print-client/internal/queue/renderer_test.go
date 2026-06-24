@@ -5,210 +5,446 @@ import (
 	"testing"
 )
 
-func TestRenderLegacyComanda(t *testing.T) {
-	legacyPayload := `{
-		"mesa": 5,
-		"items": [
-			{"nombre": "LOMO SALTADO", "cantidad": 1, "precio": 35.50},
-			{"nombre": "ARROZ CHAUFA", "cantidad": 2, "precio": 0.00}
-		]
-	}`
+// --- helpers de test ---
 
-	data, err := render("comanda", legacyPayload)
+func mustRenderText(t *testing.T, payload string) string {
+	t.Helper()
+	b, err := renderText("", payload)
 	if err != nil {
-		t.Fatalf("Error rendering legacy comanda: %v", err)
+		t.Fatalf("renderText falló: %v", err)
 	}
+	return string(b)
+}
 
-	text := string(data)
-	if !strings.Contains(text, "Mesa #5") {
-		t.Errorf("Expected 'Mesa #5', got: %q", text)
+func mustRenderESCPOS(t *testing.T, payload string) []byte {
+	t.Helper()
+	b, err := render("", payload)
+	if err != nil {
+		t.Fatalf("render falló: %v", err)
 	}
-	if !strings.Contains(text, "LOMO SALTADO") {
-		t.Errorf("Expected 'LOMO SALTADO' in output, got: %q", text)
-	}
-	if !strings.Contains(text, "ARROZ CHAUFA") {
-		t.Errorf("Expected 'ARROZ CHAUFA' in output, got: %q", text)
+	return b
+}
+
+func assertContains(t *testing.T, text, want string) {
+	t.Helper()
+	if !strings.Contains(text, want) {
+		t.Errorf("esperaba %q en la salida\ngot: %q", want, text)
 	}
 }
 
-func TestRenderStructuredComanda(t *testing.T) {
-	structuredPayload := `{
-		"options": {
-			"cut": true,
-			"drawer": false
-		},
-		"margins": {
-			"ancho_dimension": 80.0,
-			"altura_dimension": 0.0
-		},
+// --- Bloque text ---
+
+func TestRenderText(t *testing.T) {
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
 		"body": [
-			{
-				"type": "text",
-				"value": "** COMANDA **",
-				"align": "center",
-				"bold": true,
-				"size": "double"
-			},
-			{
-				"type": "separator",
-				"character": "="
-			},
-			{
-				"type": "text",
-				"value": "PEDIDO #1",
-				"align": "left",
-				"bold": true
-			},
-			{
-				"type": "table_comanda",
-				"rows": [
-					{
-						"cant": 1,
-						"producto": "LOMO SALTADO",
-						"notas": "Término medio",
-						"categoria_id": 1
-					},
-					{
-						"cant": 2,
-						"producto": "ARROZ CHAUFA",
-						"notas": null,
-						"categoria_id": 1
-					}
-				]
-			},
-			{
-				"type": "separator"
-			},
-			{
-				"type": "qr",
-				"value": "https://usqay.com/ticket/1"
-			}
+			{"type": "text", "value": "TICKET DE PRUEBA", "align": "center", "bold": true, "size": "double"},
+			{"type": "text", "value": "línea izquierda"},
+			{"type": "text", "value": "derecha", "align": "right"}
 		]
 	}`
 
-	// Test ESC/POS rendering
-	data, err := render("comanda", structuredPayload)
-	if err != nil {
-		t.Fatalf("Error rendering structured comanda (escpos): %v", err)
-	}
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "TICKET DE PRUEBA")
+	assertContains(t, text, "línea izquierda")
+	assertContains(t, text, "derecha")
+
+	data := mustRenderESCPOS(t, payload)
 	if len(data) == 0 {
-		t.Fatal("Expected non-empty ESC/POS byte array")
-	}
-
-	// Test text rendering (easier to assertions on strings)
-	textBytes, err := renderText("comanda", structuredPayload)
-	if err != nil {
-		t.Fatalf("Error rendering structured comanda (text): %v", err)
-	}
-	text := string(textBytes)
-
-	// Assertions
-	if !strings.Contains(text, "** COMANDA **") {
-		t.Errorf("Expected header '** COMANDA **', got: %q", text)
-	}
-	if !strings.Contains(text, "PEDIDO #1") {
-		t.Errorf("Expected 'PEDIDO #1', got: %q", text)
-	}
-	if !strings.Contains(text, "1   LOMO SALTADO") && !strings.Contains(text, "1    LOMO SALTADO") {
-		t.Errorf("Expected item 'LOMO SALTADO' with qty, got: %q", text)
-	}
-	if !strings.Contains(text, "* Término medio") {
-		t.Errorf("Expected observation '* Término medio', got: %q", text)
-	}
-	if !strings.Contains(text, "2   ARROZ CHAUFA") && !strings.Contains(text, "2    ARROZ CHAUFA") {
-		t.Errorf("Expected item 'ARROZ CHAUFA' with qty, got: %q", text)
-	}
-	if !strings.Contains(text, "[QR CODE: https://usqay.com/ticket/1]") {
-		t.Errorf("Expected QR code URL, got: %q", text)
+		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
 }
 
-func TestRenderStructuredTablePrecuenta(t *testing.T) {
-	structuredPayload := `{
-		"options": {
-			"cut": true,
-			"drawer": true
-		},
-		"margins": {
-			"ancho_dimension": 80.0,
-			"altura_dimension": 0.0
-		},
+// --- Bloque separator y spacer ---
+
+func TestRenderSeparatorSpacer(t *testing.T) {
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
 		"body": [
-			{
-				"type": "text",
-				"value": "PRE-CUENTA",
-				"align": "center",
-				"bold": true,
-				"size": "medium"
-			},
-			{
-				"type": "separator",
-				"character": "-"
-			},
+			{"type": "separator", "character": "="},
+			{"type": "spacer", "lines": 2},
+			{"type": "separator"}
+		]
+	}`
+
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "================================================")
+	assertContains(t, text, "------------------------------------------------")
+}
+
+// --- Bloque table: con columnas y encabezados ---
+
+func TestRenderTableWithColumns(t *testing.T) {
+	payload := `{
+		"options": {"cut": true, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [
 			{
 				"type": "table",
-				"headers": ["CANT", "PRODUCTO", "TOTAL"],
-				"widths": [0.1, 0.65, 0.25],
-				"aligns": ["left", "left", "right"],
+				"columns": [
+					{"header": "CANT",     "width": 0.10, "align": "left"},
+					{"header": "PRODUCTO", "width": 0.65, "align": "left"},
+					{"header": "TOTAL",    "width": 0.25, "align": "right"}
+				],
 				"rows": [
+					{"cells": [{"text": "2"}, {"text": "LOMO SALTADO"},   {"text": "S/ 42.00"}]},
+					{"cells": [{"text": "1"}, {"text": "COCA COLA ZERO"}, {"text": "S/ 5.00"}]},
 					{
-						"cant": 1,
-						"producto": "LOMO SALTADO",
-						"total": "S/ 35.50",
-						"categoria_id": 1
-					},
-					{
-						"cant": 2,
-						"producto": "COCA COLA ZERO",
-						"total": "S/ 10.00",
-						"categoria_id": 2
+						"bold": true,
+						"cells": [
+							{"text": ""},
+							{"text": "Total a pagar:"},
+							{"text": "S/ 47.00", "bold": true}
+						]
 					}
 				]
-			},
-			{
-				"type": "separator",
-				"character": "="
 			}
 		]
 	}`
 
-	textBytes, err := renderText("precuenta", structuredPayload)
-	if err != nil {
-		t.Fatalf("Error rendering structured table (text): %v", err)
-	}
-	text := string(textBytes)
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "CANT")
+	assertContains(t, text, "PRODUCTO")
+	assertContains(t, text, "TOTAL")
+	assertContains(t, text, "LOMO SALTADO")
+	assertContains(t, text, "S/ 42.00")
+	assertContains(t, text, "COCA COLA ZERO")
+	assertContains(t, text, "Total a pagar:")
+	assertContains(t, text, "S/ 47.00")
 
-	// Verify columns format
-	if !strings.Contains(text, "CANT") || !strings.Contains(text, "PRODUCTO") || !strings.Contains(text, "TOTAL") {
-		t.Errorf("Expected table headers in output, got: %q", text)
-	}
-	if !strings.Contains(text, "LOMO SALTADO") || !strings.Contains(text, "S/ 35.50") {
-		t.Errorf("Expected table row contents in output, got: %q", text)
-	}
-	if !strings.Contains(text, "COCA COLA ZERO") || !strings.Contains(text, "S/ 10.00") {
-		t.Errorf("Expected table row contents in output, got: %q", text)
+	data := mustRenderESCPOS(t, payload)
+	if len(data) == 0 {
+		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
 }
 
-func TestGetRowValueSemantics(t *testing.T) {
-	row := map[string]any{
-		"cantidad":        2,
-		"nombre_producto": "CEBICHE CLASSIC",
-		"precio":          "S/ 45.00",
-	}
+// --- Bloque table: modo automático sin columnas (reemplaza key_value) ---
 
-	qtyVal := getRowValue(row, "CANT")
-	if qtyVal != "2" {
-		t.Errorf("Expected '2', got %q", qtyVal)
-	}
+func TestRenderTableAutoColumns(t *testing.T) {
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [
+			{
+				"type": "table",
+				"columns": null,
+				"rows": [
+					{"cells": [{"text": "Subtotal:"},  {"text": "S/ 42.00"}]},
+					{"cells": [{"text": "IGV (18%):"}, {"text": "S/ 7.56"}]},
+					{"bold": true, "cells": [{"text": "Total:"}, {"text": "S/ 49.56"}]}
+				]
+			}
+		]
+	}`
 
-	prodVal := getRowValue(row, "PRODUCTO")
-	if prodVal != "CEBICHE CLASSIC" {
-		t.Errorf("Expected 'CEBICHE CLASSIC', got %q", prodVal)
-	}
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "Subtotal:")
+	assertContains(t, text, "S/ 42.00")
+	assertContains(t, text, "IGV (18%):")
+	assertContains(t, text, "Total:")
+	assertContains(t, text, "S/ 49.56")
+}
 
-	totalVal := getRowValue(row, "TOTAL")
-	if totalVal != "S/ 45.00" {
-		t.Errorf("Expected 'S/ 45.00', got %q", totalVal)
+// --- Bloque table: merge:true (comanda con notas) ---
+
+func TestRenderTableMerge(t *testing.T) {
+	payload := `{
+		"options": {"cut": true, "drawer": false},
+		"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0},
+		"body": [
+			{"type": "text", "value": "** COMANDA **", "align": "center", "bold": true},
+			{
+				"type": "table",
+				"columns": [
+					{"header": "CANT",     "width": 0.15, "align": "left"},
+					{"header": "PRODUCTO", "width": 0.85, "align": "left"}
+				],
+				"rows": [
+					{"cells": [{"text": "2"}, {"text": "ARROZ CHAUFA"}]},
+					{"merge": true, "cells": [{"text": "↳ Bien tostado, sin cebollita"}]},
+					{"cells": [{"text": "1"}, {"text": "LOMO SALTADO"}]}
+				]
+			}
+		]
+	}`
+
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "** COMANDA **")
+	assertContains(t, text, "ARROZ CHAUFA")
+	assertContains(t, text, "↳ Bien tostado, sin cebollita")
+	assertContains(t, text, "LOMO SALTADO")
+
+	data := mustRenderESCPOS(t, payload)
+	if len(data) == 0 {
+		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
+}
+
+// --- Bloque columns ---
+
+func TestRenderColumns(t *testing.T) {
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [
+			{
+				"type": "columns",
+				"columns": [
+					{"text": "Caja #1",          "width": 0.5, "align": "left"},
+					{"text": "12/06/2026 14:30", "width": 0.5, "align": "right"}
+				]
+			},
+			{
+				"type": "columns",
+				"columns": [
+					{"text": "Mozo:",      "width": 0.3, "align": "left"},
+					{"text": "Juan Pérez", "width": 0.7, "align": "left", "bold": true}
+				]
+			}
+		]
+	}`
+
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "Caja #1")
+	assertContains(t, text, "12/06/2026 14:30")
+	assertContains(t, text, "Mozo:")
+	assertContains(t, text, "Juan Pérez")
+
+	data := mustRenderESCPOS(t, payload)
+	if len(data) == 0 {
+		t.Fatal("se esperaba output ESC/POS no vacío")
+	}
+}
+
+// --- Bloque qr ---
+
+func TestRenderQR(t *testing.T) {
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [
+			{"type": "qr", "value": "https://app.usqay.com/c/abc123", "align": "center", "size": 6}
+		]
+	}`
+
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "[QR: https://app.usqay.com/c/abc123]")
+
+	data := mustRenderESCPOS(t, payload)
+	if len(data) == 0 {
+		t.Fatal("se esperaba output ESC/POS no vacío")
+	}
+}
+
+// --- Bloque barcode ---
+
+func TestRenderBarcode(t *testing.T) {
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [
+			{
+				"type": "barcode",
+				"symbology": "CODE128",
+				"value": "B001-00000042",
+				"align": "center",
+				"height": 80,
+				"hri": "below"
+			}
+		]
+	}`
+
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "[BARCODE CODE128: B001-00000042]")
+
+	data := mustRenderESCPOS(t, payload)
+	if len(data) == 0 {
+		t.Fatal("se esperaba output ESC/POS no vacío")
+	}
+}
+
+// --- Ticket completo: precuenta ---
+
+func TestRenderTicketPrecuenta(t *testing.T) {
+	payload := `{
+		"options": {"cut": true, "drawer": true},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [
+			{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
+			{"type": "separator", "character": "="},
+			{
+				"type": "columns",
+				"columns": [
+					{"text": "Mesa: 5",          "width": 0.5, "align": "left"},
+					{"text": "12/06/2026 14:30", "width": 0.5, "align": "right"}
+				]
+			},
+			{"type": "separator"},
+			{
+				"type": "table",
+				"columns": [
+					{"header": "CANT",     "width": 0.10, "align": "left"},
+					{"header": "PRODUCTO", "width": 0.65, "align": "left"},
+					{"header": "TOTAL",    "width": 0.25, "align": "right"}
+				],
+				"rows": [
+					{"cells": [{"text": "2"}, {"text": "LOMO SALTADO"},   {"text": "S/ 42.00"}]},
+					{"cells": [{"text": "1"}, {"text": "COCA COLA ZERO"}, {"text": "S/ 5.00"}]}
+				]
+			},
+			{"type": "separator"},
+			{
+				"type": "table",
+				"columns": null,
+				"rows": [
+					{"cells": [{"text": "Subtotal:"},  {"text": "S/ 47.00"}]},
+					{"cells": [{"text": "IGV (18%):"}, {"text": "S/ 8.46"}]},
+					{
+						"bold": true,
+						"cells": [{"text": "TOTAL:"}, {"text": "S/ 55.46", "size": "double"}]
+					}
+				]
+			},
+			{"type": "qr", "value": "https://app.usqay.com/c/abc123", "align": "center"}
+		]
+	}`
+
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "RESTAURANTE USQAY")
+	assertContains(t, text, "Mesa: 5")
+	assertContains(t, text, "LOMO SALTADO")
+	assertContains(t, text, "S/ 42.00")
+	assertContains(t, text, "COCA COLA ZERO")
+	assertContains(t, text, "Subtotal:")
+	assertContains(t, text, "TOTAL:")
+	assertContains(t, text, "S/ 55.46")
+
+	data := mustRenderESCPOS(t, payload)
+	if len(data) == 0 {
+		t.Fatal("se esperaba output ESC/POS no vacío para ticket precuenta completo")
+	}
+}
+
+// --- Helpers de layout ---
+
+func TestFormatCol(t *testing.T) {
+	tests := []struct {
+		text     string
+		width    int
+		align    string
+		expected string
+	}{
+		{"hola", 8, "left", "hola    "},
+		{"hola", 8, "right", "    hola"},
+		{"hola", 8, "center", "  hola  "},
+		{"truncado", 4, "left", "trun"},
+		{"", 5, "left", "     "},
+	}
+	for _, tc := range tests {
+		got := formatCol(tc.text, tc.width, tc.align)
+		if got != tc.expected {
+			t.Errorf("formatCol(%q, %d, %q) = %q, want %q", tc.text, tc.width, tc.align, got, tc.expected)
+		}
+	}
+}
+
+func TestResolveTableLayoutAuto(t *testing.T) {
+	block := TableBlock{
+		Columns: nil,
+		Rows: []TableRow{
+			{Cells: []TableCell{{Text: "A"}, {Text: "B"}, {Text: "C"}}},
+		},
+	}
+	widths, aligns := resolveTableLayout(block, 48)
+	if len(widths) != 3 {
+		t.Fatalf("esperaba 3 columnas, got %d", len(widths))
+	}
+	total := 0
+	for _, w := range widths {
+		total += w
+	}
+	if total != 48 {
+		t.Errorf("suma de anchos = %d, want 48", total)
+	}
+	for i, a := range aligns {
+		if a != "left" {
+			t.Errorf("aligns[%d] = %q, want 'left'", i, a)
+		}
+	}
+}
+
+func TestResolveTableLayoutWithColumns(t *testing.T) {
+	header := "TOTAL"
+	block := TableBlock{
+		Columns: []TableColumn{
+			{Width: 0.10, Align: "left"},
+			{Width: 0.65, Align: "left"},
+			{Header: &header, Width: 0.25, Align: "right"},
+		},
+	}
+	widths, aligns := resolveTableLayout(block, 48)
+	if len(widths) != 3 {
+		t.Fatalf("esperaba 3 columnas, got %d", len(widths))
+	}
+	total := 0
+	for _, w := range widths {
+		total += w
+	}
+	if total != 48 {
+		t.Errorf("suma de anchos = %d, want 48", total)
+	}
+	if aligns[2] != "right" {
+		t.Errorf("aligns[2] = %q, want 'right'", aligns[2])
+	}
+}
+
+func TestPageWidth(t *testing.T) {
+	tests := []struct {
+		dim      float64
+		expected int
+	}{
+		{80.0, 48},
+		{58.0, 32},
+		{0.0, 32},
+		{60.1, 48},
+		{60.0, 32},
+	}
+	for _, tc := range tests {
+		got := pageWidth(tc.dim)
+		if got != tc.expected {
+			t.Errorf("pageWidth(%v) = %d, want %d", tc.dim, got, tc.expected)
+		}
+	}
+}
+
+// --- Error handling ---
+
+func TestRenderInvalidPayload(t *testing.T) {
+	_, err := render("", "esto no es json")
+	if err == nil {
+		t.Error("esperaba error para payload inválido")
+	}
+}
+
+func TestRenderEmptyBody(t *testing.T) {
+	payload := `{"options": {"cut": false, "drawer": false}, "margins": {"ancho_dimension": 80}, "body": []}`
+	_, err := render("", payload)
+	if err == nil {
+		t.Error("esperaba error para body vacío")
+	}
+}
+
+func TestRenderUnknownBlockSkipped(t *testing.T) {
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [
+			{"type": "unknown_block", "foo": "bar"},
+			{"type": "text", "value": "visible"}
+		]
+	}`
+	text := mustRenderText(t, payload)
+	assertContains(t, text, "visible")
 }

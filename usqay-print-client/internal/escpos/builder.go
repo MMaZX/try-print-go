@@ -1,7 +1,9 @@
 // Package escpos constructs ESC/POS byte sequences for thermal printers.
 package escpos
 
-import "strings"
+import (
+	"strings"
+)
 
 // Standard ESC/POS command bytes.
 var (
@@ -117,6 +119,65 @@ func (b *Builder) QR(data string, size int) *Builder {
 	b.raw([]byte(data))
 	// 5. Print
 	b.raw([]byte{0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 48})
+	return b
+}
+
+// Barcode prints a 1D barcode using GS k (new format).
+// Supported symbologies: CODE128, CODE39, EAN13, EAN8, UPCA, UPCE, ITF.
+// height is bar height in dots (default 80), width is module width 1–6 (default 2).
+// hri controls the Human Readable Interpretation position: "below" (default), "above", "both", "none".
+func (b *Builder) Barcode(symbology, value string, height, width int, hri string) *Builder {
+	if value == "" {
+		return b
+	}
+
+	// GS h n — set barcode height
+	if height <= 0 {
+		height = 80
+	}
+	b.raw([]byte{0x1D, 0x68, byte(height)})
+
+	// GS w n — set barcode module width
+	if width < 1 || width > 6 {
+		width = 2
+	}
+	b.raw([]byte{0x1D, 0x77, byte(width)})
+
+	// GS H n — set HRI position (0=none, 1=above, 2=below, 3=both)
+	hriPos := byte(2)
+	switch hri {
+	case "none":
+		hriPos = 0
+	case "above":
+		hriPos = 1
+	case "both":
+		hriPos = 3
+	}
+	b.raw([]byte{0x1D, 0x48, hriPos})
+
+	// GS k m n d1...dn — print barcode (new format, m >= 65)
+	var m byte
+	switch strings.ToUpper(symbology) {
+	case "UPCA":
+		m = 65
+	case "UPCE":
+		m = 66
+	case "EAN13":
+		m = 67
+	case "EAN8":
+		m = 68
+	case "CODE39":
+		m = 69
+	case "ITF":
+		m = 70
+	default: // CODE128 y cualquier otro
+		m = 73
+	}
+
+	data := []byte(value)
+	b.raw([]byte{0x1D, 0x6B, m, byte(len(data))})
+	b.raw(data)
+	b.raw([]byte{'\n'})
 	return b
 }
 

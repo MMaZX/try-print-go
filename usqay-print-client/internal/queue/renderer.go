@@ -3,181 +3,223 @@ package queue
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
-	"time"
 
 	"usqay-print-client/internal/escpos"
 )
 
-// PrintPayload represents the generic structured print job payload.
+// --- Tipos del schema de payload ---
+
+// PrintPayload es el payload raíz de un trabajo de impresión.
 type PrintPayload struct {
-	Options struct {
-		Cut    bool `json:"cut"`
-		Drawer bool `json:"drawer"`
-	} `json:"options"`
-	Margins struct {
-		AnchoDimension  float64 `json:"ancho_dimension"`
-		AlturaDimension float64 `json:"altura_dimension"`
-	} `json:"margins"`
-	Body []PrintBlock `json:"body"`
+	Options PrintOptions  `json:"options"`
+	Margins PrintMargins  `json:"margins"`
+	Body    []json.RawMessage `json:"body"`
 }
 
-// PrintBlock represents an individual printing instruction block.
-type PrintBlock struct {
-	Type      string          `json:"type"`
-	Value     string          `json:"value,omitempty"`
-	Align     string          `json:"align,omitempty"`
-	Bold      bool            `json:"bold,omitempty"`
-	Size      string          `json:"size,omitempty"`
-	Character string          `json:"character,omitempty"`
-	Lines     int             `json:"lines,omitempty"`
-	Headers   []string        `json:"headers,omitempty"`
-	Widths    []float64       `json:"widths,omitempty"`
-	Aligns    []string        `json:"aligns,omitempty"`
-	Rows      json.RawMessage `json:"rows,omitempty"`
+// PrintOptions controla el comportamiento del hardware.
+type PrintOptions struct {
+	Cut    bool `json:"cut"`
+	Drawer bool `json:"drawer"`
 }
 
-// comandaItemRow represents a single row in a comanda table.
-type comandaItemRow struct {
-	Cant        int     `json:"cant"`
-	Producto    string  `json:"producto"`
-	Notas       *string `json:"notas"`
-	CategoriaID int     `json:"categoria_id"`
+// PrintMargins define el tamaño físico del papel.
+type PrintMargins struct {
+	AnchoDimension  float64 `json:"ancho_dimension"`
+	AlturaDimension float64 `json:"altura_dimension"`
 }
 
-// Legacy comandaDoc matches the legacy JSON payload for "comanda" documents.
-type comandaDoc struct {
-	Mesa  int           `json:"mesa"`
-	Items []comandaItem `json:"items"`
+// blockEnvelope inspecciona el campo type sin deserializar el bloque completo.
+type blockEnvelope struct {
+	Type string `json:"type"`
 }
 
-type comandaItem struct {
-	Nombre   string  `json:"nombre"`
-	Cantidad int     `json:"cantidad"`
-	Precio   float64 `json:"precio,omitempty"`
+// TextBlock representa un bloque type:"text".
+type TextBlock struct {
+	Value string `json:"value"`
+	Align string `json:"align"`
+	Bold  bool   `json:"bold"`
+	Size  string `json:"size"`
 }
 
-// render converts a JSON payload to ESC/POS bytes for thermal printers.
-func render(tipoDocumento, payload string) ([]byte, error) {
-	var structured PrintPayload
-	if err := json.Unmarshal([]byte(payload), &structured); err == nil && len(structured.Body) > 0 {
-		return renderStructured(structured)
+// SeparatorBlock representa un bloque type:"separator".
+type SeparatorBlock struct {
+	Character string `json:"character"`
+}
+
+// SpacerBlock representa un bloque type:"spacer".
+type SpacerBlock struct {
+	Lines int `json:"lines"`
+}
+
+// TableColumn define una columna dentro de un bloque table.
+type TableColumn struct {
+	Header *string `json:"header"` // nil cuando no se especifica
+	Width  float64 `json:"width"`
+	Align  string  `json:"align"`
+}
+
+// TableCell es una celda individual dentro de una fila de tabla.
+// Bold es puntero para distinguir "no especificado" (hereda de la fila) de "false explícito".
+type TableCell struct {
+	Text  string `json:"text"`
+	Bold  *bool  `json:"bold"`
+	Size  string `json:"size"`
+	Align string `json:"align"`
+}
+
+// TableRow es una fila del cuerpo de una tabla.
+type TableRow struct {
+	Cells []TableCell `json:"cells"`
+	Bold  bool        `json:"bold"`
+	Merge bool        `json:"merge"`
+}
+
+// TableBlock representa un bloque type:"table".
+// Columns es nil en modo automático (anchos iguales, sin encabezado).
+type TableBlock struct {
+	Columns []TableColumn `json:"columns"`
+	Rows    []TableRow    `json:"rows"`
+}
+
+// ColumnsCell es una celda dentro de un bloque type:"columns".
+type ColumnsCell struct {
+	Text  string  `json:"text"`
+	Width float64 `json:"width"`
+	Align string  `json:"align"`
+	Bold  bool    `json:"bold"`
+	Size  string  `json:"size"`
+}
+
+// ColumnsBlock representa un bloque type:"columns".
+type ColumnsBlock struct {
+	Columns []ColumnsCell `json:"columns"`
+}
+
+// QRBlock representa un bloque type:"qr".
+type QRBlock struct {
+	Value string `json:"value"`
+	Align string `json:"align"`
+	Size  int    `json:"size"`
+}
+
+// BarcodeBlock representa un bloque type:"barcode".
+type BarcodeBlock struct {
+	Symbology string `json:"symbology"`
+	Value     string `json:"value"`
+	Align     string `json:"align"`
+	Height    int    `json:"height"`
+	Width     int    `json:"width"`
+	HRI       string `json:"hri"`
+}
+
+// --- Puntos de entrada ---
+
+// render convierte un payload JSON a bytes ESC/POS para impresoras térmicas.
+func render(_, payload string) ([]byte, error) {
+	var p PrintPayload
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return nil, fmt.Errorf("parsear payload: %w", err)
 	}
-
-	switch tipoDocumento {
-	case "comanda":
-		return renderComanda(payload)
-	default:
-		return nil, fmt.Errorf("tipo_documento desconocido: %q", tipoDocumento)
+	if len(p.Body) == 0 {
+		return nil, fmt.Errorf("payload sin bloques en body")
 	}
+	return renderStructured(p)
 }
 
-// renderText converts a JSON payload to plain UTF-8 text for inkjet/laser printers.
-// Output ends with \f (form feed) to eject the page on regular printers.
-func renderText(tipoDocumento, payload string) ([]byte, error) {
-	var structured PrintPayload
-	if err := json.Unmarshal([]byte(payload), &structured); err == nil && len(structured.Body) > 0 {
-		return renderStructuredText(structured)
+// renderText convierte un payload JSON a texto UTF-8 plano para impresoras no térmicas.
+// El resultado termina con \f (form feed) para expulsar la hoja.
+func renderText(_, payload string) ([]byte, error) {
+	var p PrintPayload
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return nil, fmt.Errorf("parsear payload: %w", err)
 	}
-
-	switch tipoDocumento {
-	case "comanda":
-		return renderComandaText(payload)
-	default:
-		return nil, fmt.Errorf("tipo_documento desconocido: %q", tipoDocumento)
+	if len(p.Body) == 0 {
+		return nil, fmt.Errorf("payload sin bloques en body")
 	}
+	return renderStructuredText(p)
 }
 
-// renderStructured converts a generic structured payload to ESC/POS bytes.
+// --- Renderer ESC/POS ---
+
 func renderStructured(payload PrintPayload) ([]byte, error) {
 	b := escpos.New()
-
-	// Handle drawer opening at the start of the ticket
 	if payload.Options.Drawer {
 		b.Drawer()
 	}
+	width := pageWidth(payload.Margins.AnchoDimension)
 
-	// Resolve page character width from margins
-	width := 32
-	if payload.Margins.AnchoDimension > 60 {
-		width = 48
-	}
+	for _, raw := range payload.Body {
+		var env blockEnvelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			slog.Warn("skip bloque con JSON inválido", "err", err)
+			continue
+		}
 
-	for _, block := range payload.Body {
-		switch block.Type {
+		switch env.Type {
 		case "text":
-			switch block.Align {
-			case "center":
-				b.Center()
-			case "right":
-				b.Right()
-			default:
-				b.Left()
+			var block TextBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				slog.Warn("skip bloque text inválido", "err", err)
+				continue
 			}
-			b.Bold(block.Bold)
-			b.Size(block.Size)
-			b.Line(block.Value)
-			b.Size("normal")
-			b.Bold(false)
+			applyAlign(b, block.Align)
+			b.Bold(block.Bold).Size(block.Size).Line(block.Value)
+			b.Bold(false).Size("normal")
 
 		case "separator":
-			char := "-"
-			if block.Character != "" {
-				char = block.Character
-			}
-			sepLine := strings.Repeat(char, width)
-			if len(sepLine) > width {
-				sepLine = sepLine[:width]
-			}
-			b.Left().Line(sepLine)
+			var block SeparatorBlock
+			json.Unmarshal(raw, &block) //nolint:errcheck // todos los campos son opcionales
+			char := orDefault(block.Character, "-")
+			b.Left().Line(strings.Repeat(char, width))
 
 		case "spacer":
-			lines := 1
-			if block.Lines > 0 {
-				lines = block.Lines
-			}
-			b.Feed(lines)
-
-		case "table_comanda":
-			var rows []comandaItemRow
-			if err := json.Unmarshal(block.Rows, &rows); err != nil {
-				continue
-			}
-			b.Left()
-			for _, row := range rows {
-				qtyStr := fmt.Sprintf("%-4d", row.Cant)
-				b.Line(qtyStr + row.Producto)
-				if row.Notas != nil && *row.Notas != "" {
-					b.Line("    * " + *row.Notas)
-				}
-			}
+			var block SpacerBlock
+			json.Unmarshal(raw, &block) //nolint:errcheck // todos los campos son opcionales
+			b.Feed(positiveOrDefault(block.Lines, 1))
 
 		case "table":
-			var rows []map[string]any
-			if err := json.Unmarshal(block.Rows, &rows); err != nil {
+			var block TableBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				slog.Warn("skip bloque table inválido", "err", err)
 				continue
 			}
-			if len(block.Headers) > 0 {
-				headerLine := formatTableHeader(block.Headers, block.Widths, block.Aligns, width)
-				b.Left().Bold(true).Line(headerLine).Bold(false)
-				b.Left().Separator(width)
+			renderTableESCPOS(b, block, width)
+
+		case "columns":
+			var block ColumnsBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				slog.Warn("skip bloque columns inválido", "err", err)
+				continue
 			}
-			for _, row := range rows {
-				rowLine := formatTableRow(row, block.Headers, block.Widths, block.Aligns, width)
-				b.Left().Line(rowLine)
-			}
+			renderColumnsESCPOS(b, block, width)
 
 		case "qr":
-			switch block.Align {
-			case "center":
-				b.Center()
-			case "right":
-				b.Right()
-			default:
-				b.Left()
+			var block QRBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				slog.Warn("skip bloque qr inválido", "err", err)
+				continue
 			}
-			b.QR(block.Value, 6)
-			b.Left() // reset alignment
+			applyAlign(b, block.Align)
+			b.QR(block.Value, positiveOrDefault(block.Size, 6))
+			b.Left()
+
+		case "barcode":
+			var block BarcodeBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				slog.Warn("skip bloque barcode inválido", "err", err)
+				continue
+			}
+			applyAlign(b, block.Align)
+			b.Barcode(block.Symbology, block.Value, block.Height, block.Width, block.HRI)
+			b.Left()
+
+		case "image":
+			slog.Warn("bloque image aún no implementado, saltando")
+
+		default:
+			slog.Warn("tipo de bloque desconocido, saltando", "type", env.Type)
 		}
 	}
 
@@ -186,132 +228,376 @@ func renderStructured(payload PrintPayload) ([]byte, error) {
 	} else {
 		b.Feed(3)
 	}
-
 	return b.Bytes(), nil
 }
 
-// renderStructuredText converts a generic structured payload to plain UTF-8 text.
-func renderStructuredText(payload PrintPayload) ([]byte, error) {
-	width := 48
-	if payload.Margins.AnchoDimension > 0 && payload.Margins.AnchoDimension <= 60 {
-		width = 32
+// renderTableESCPOS renderiza un bloque table a comandos ESC/POS.
+func renderTableESCPOS(b *escpos.Builder, block TableBlock, totalWidth int) {
+	colWidths, colAligns := resolveTableLayout(block, totalWidth)
+
+	if hasTableHeaders(block.Columns) {
+		headers := make([]string, len(block.Columns))
+		for i, col := range block.Columns {
+			if col.Header != nil {
+				headers[i] = *col.Header
+			}
+		}
+		b.Left().Bold(true).Line(formatColumns(headers, colWidths, colAligns)).Bold(false)
+		b.Left().Line(strings.Repeat("-", totalWidth))
 	}
 
+	for _, row := range block.Rows {
+		b.Left()
+		if row.Merge {
+			renderMergeRowESCPOS(b, row, totalWidth)
+		} else {
+			renderTableRowESCPOS(b, row, colWidths, colAligns)
+		}
+	}
+}
+
+// renderMergeRowESCPOS imprime la primera celda de la fila ocupando el ancho completo.
+func renderMergeRowESCPOS(b *escpos.Builder, row TableRow, totalWidth int) {
+	if len(row.Cells) == 0 {
+		return
+	}
+	cell := row.Cells[0]
+	align := orDefault(cell.Align, "left")
+	effectiveBold := row.Bold || (cell.Bold != nil && *cell.Bold)
+	cellSize := orDefault(cell.Size, "normal")
+
+	if effectiveBold {
+		b.Bold(true)
+	}
+	if cellSize != "normal" {
+		b.Size(cellSize)
+	}
+	b.Line(formatCol(cell.Text, totalWidth, align))
+	if cellSize != "normal" {
+		b.Size("normal")
+	}
+	if effectiveBold {
+		b.Bold(false)
+	}
+}
+
+// renderTableRowESCPOS imprime una fila normal con soporte de formato por celda.
+func renderTableRowESCPOS(b *escpos.Builder, row TableRow, colWidths []int, colAligns []string) {
+	// Detectar si alguna celda necesita formato individual.
+	needsPerCell := false
+	for _, cell := range row.Cells {
+		if cell.Bold != nil || (cell.Size != "" && cell.Size != "normal") {
+			needsPerCell = true
+			break
+		}
+	}
+
+	if !needsPerCell {
+		// Camino simple: construir la línea como string.
+		var sb strings.Builder
+		for i, cell := range row.Cells {
+			if i >= len(colWidths) {
+				break
+			}
+			align := resolveAlign(cell.Align, colAlignAt(colAligns, i))
+			sb.WriteString(formatCol(cell.Text, colWidths[i], align))
+		}
+		if row.Bold {
+			b.Bold(true)
+		}
+		b.Line(sb.String())
+		if row.Bold {
+			b.Bold(false)
+		}
+		return
+	}
+
+	// Camino complejo: emitir segmentos con toggles de bold/size por celda.
+	curBold := row.Bold
+	if curBold {
+		b.Bold(true)
+	}
+
+	for i, cell := range row.Cells {
+		if i >= len(colWidths) {
+			break
+		}
+		align := resolveAlign(cell.Align, colAlignAt(colAligns, i))
+
+		cellBold := curBold
+		if cell.Bold != nil {
+			cellBold = *cell.Bold
+		}
+		if cellBold != curBold {
+			b.Bold(cellBold)
+			curBold = cellBold
+		}
+
+		cellSize := orDefault(cell.Size, "normal")
+		if cellSize != "normal" {
+			b.Size(cellSize)
+			b.Text(cell.Text) // sin padding en tamaños no estándar
+			b.Size("normal")
+		} else {
+			b.Text(formatCol(cell.Text, colWidths[i], align))
+		}
+	}
+
+	if curBold {
+		b.Bold(false)
+	}
+	b.Text("\n")
+}
+
+// renderColumnsESCPOS renderiza un bloque type:"columns" a comandos ESC/POS.
+func renderColumnsESCPOS(b *escpos.Builder, block ColumnsBlock, totalWidth int) {
+	colWidths := layoutColumnWidths(block.Columns, totalWidth)
+	b.Left()
+	for i, col := range block.Columns {
+		align := orDefault(col.Align, "left")
+		if col.Bold {
+			b.Bold(true)
+		}
+		if col.Size != "" && col.Size != "normal" {
+			b.Size(col.Size)
+			b.Text(col.Text)
+			b.Size("normal")
+		} else {
+			b.Text(formatCol(col.Text, colWidths[i], align))
+		}
+		if col.Bold {
+			b.Bold(false)
+		}
+	}
+	b.Text("\n")
+}
+
+// --- Renderer de texto plano ---
+
+func renderStructuredText(payload PrintPayload) ([]byte, error) {
+	width := pageWidth(payload.Margins.AnchoDimension)
 	var sb strings.Builder
 
-	center := func(s string) string {
+	for _, raw := range payload.Body {
+		var env blockEnvelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			continue
+		}
+
+		switch env.Type {
+		case "text":
+			var block TextBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			sb.WriteString(applyAlignText(block.Value, block.Align, width) + "\n")
+
+		case "separator":
+			var block SeparatorBlock
+			json.Unmarshal(raw, &block) //nolint:errcheck
+			char := orDefault(block.Character, "-")
+			sb.WriteString(strings.Repeat(char, width) + "\n")
+
+		case "spacer":
+			var block SpacerBlock
+			json.Unmarshal(raw, &block) //nolint:errcheck
+			sb.WriteString(strings.Repeat("\n", positiveOrDefault(block.Lines, 1)))
+
+		case "table":
+			var block TableBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			renderTableText(&sb, block, width)
+
+		case "columns":
+			var block ColumnsBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			renderColumnsText(&sb, block, width)
+
+		case "qr":
+			var block QRBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			sb.WriteString(applyAlignText(fmt.Sprintf("[QR: %s]", block.Value), block.Align, width) + "\n")
+
+		case "barcode":
+			var block BarcodeBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			label := fmt.Sprintf("[BARCODE %s: %s]", block.Symbology, block.Value)
+			sb.WriteString(applyAlignText(label, block.Align, width) + "\n")
+
+		case "image":
+			sb.WriteString("[IMAGE]\n")
+
+		default:
+			slog.Warn("tipo de bloque desconocido en renderText, saltando", "type", env.Type)
+		}
+	}
+
+	sb.WriteString("\n\n\n\f")
+	return []byte(sb.String()), nil
+}
+
+// renderTableText renderiza un bloque table a texto plano.
+func renderTableText(sb *strings.Builder, block TableBlock, totalWidth int) {
+	colWidths, colAligns := resolveTableLayout(block, totalWidth)
+
+	if hasTableHeaders(block.Columns) {
+		headers := make([]string, len(block.Columns))
+		for i, col := range block.Columns {
+			if col.Header != nil {
+				headers[i] = *col.Header
+			}
+		}
+		sb.WriteString(formatColumns(headers, colWidths, colAligns) + "\n")
+		sb.WriteString(strings.Repeat("-", totalWidth) + "\n")
+	}
+
+	for _, row := range block.Rows {
+		if row.Merge {
+			if len(row.Cells) > 0 {
+				cell := row.Cells[0]
+				align := orDefault(cell.Align, "left")
+				sb.WriteString(formatCol(cell.Text, totalWidth, align) + "\n")
+			}
+			continue
+		}
+		var line strings.Builder
+		for i, cell := range row.Cells {
+			if i >= len(colWidths) {
+				break
+			}
+			align := resolveAlign(cell.Align, colAlignAt(colAligns, i))
+			line.WriteString(formatCol(cell.Text, colWidths[i], align))
+		}
+		sb.WriteString(line.String() + "\n")
+	}
+}
+
+// renderColumnsText renderiza un bloque type:"columns" a texto plano.
+func renderColumnsText(sb *strings.Builder, block ColumnsBlock, totalWidth int) {
+	colWidths := layoutColumnWidths(block.Columns, totalWidth)
+	var line strings.Builder
+	for i, col := range block.Columns {
+		align := orDefault(col.Align, "left")
+		line.WriteString(formatCol(col.Text, colWidths[i], align))
+	}
+	sb.WriteString(line.String() + "\n")
+}
+
+// --- Helpers de layout ---
+
+// pageWidth devuelve el ancho en caracteres según el ancho físico del papel.
+func pageWidth(anchoDim float64) int {
+	if anchoDim > 60 {
+		return 48
+	}
+	return 32
+}
+
+// applyAlign emite el comando ESC/POS de alineación correspondiente.
+func applyAlign(b *escpos.Builder, align string) {
+	switch align {
+	case "center":
+		b.Center()
+	case "right":
+		b.Right()
+	default:
+		b.Left()
+	}
+}
+
+// applyAlignText aplica alineación a un string para el renderer de texto plano.
+func applyAlignText(s, align string, width int) string {
+	switch align {
+	case "center":
 		if len(s) >= width {
 			return s
 		}
 		pad := (width - len(s)) / 2
 		return strings.Repeat(" ", pad) + s
-	}
-
-	right := func(s string) string {
+	case "right":
 		if len(s) >= width {
 			return s
 		}
-		pad := width - len(s)
-		return strings.Repeat(" ", pad) + s
+		return strings.Repeat(" ", width-len(s)) + s
+	default:
+		return s
 	}
-
-	for _, block := range payload.Body {
-		switch block.Type {
-		case "text":
-			text := block.Value
-			if block.Align == "center" {
-				sb.WriteString(center(text) + "\n")
-			} else if block.Align == "right" {
-				sb.WriteString(right(text) + "\n")
-			} else {
-				sb.WriteString(text + "\n")
-			}
-
-		case "separator":
-			char := "-"
-			if block.Character != "" {
-				char = block.Character
-			}
-			sepLine := strings.Repeat(char, width)
-			if len(sepLine) > width {
-				sepLine = sepLine[:width]
-			}
-			sb.WriteString(sepLine + "\n")
-
-		case "spacer":
-			lines := 1
-			if block.Lines > 0 {
-				lines = block.Lines
-			}
-			sb.WriteString(strings.Repeat("\n", lines))
-
-		case "table_comanda":
-			var rows []comandaItemRow
-			if err := json.Unmarshal(block.Rows, &rows); err != nil {
-				continue
-			}
-			for _, row := range rows {
-				qtyStr := fmt.Sprintf("%-4d", row.Cant)
-				sb.WriteString(qtyStr + row.Producto + "\n")
-				if row.Notas != nil && *row.Notas != "" {
-					sb.WriteString("    * " + *row.Notas + "\n")
-				}
-			}
-
-		case "table":
-			var rows []map[string]any
-			if err := json.Unmarshal(block.Rows, &rows); err != nil {
-				continue
-			}
-			if len(block.Headers) > 0 {
-				headerLine := formatTableHeader(block.Headers, block.Widths, block.Aligns, width)
-				sb.WriteString(headerLine + "\n")
-				sb.WriteString(strings.Repeat("-", width) + "\n")
-			}
-			for _, row := range rows {
-				rowLine := formatTableRow(row, block.Headers, block.Widths, block.Aligns, width)
-				sb.WriteString(rowLine + "\n")
-			}
-
-		case "qr":
-			qrText := fmt.Sprintf("[QR CODE: %s]", block.Value)
-			if block.Align == "center" {
-				sb.WriteString(center(qrText) + "\n")
-			} else if block.Align == "right" {
-				sb.WriteString(right(qrText) + "\n")
-			} else {
-				sb.WriteString(qrText + "\n")
-			}
-		}
-	}
-
-	sb.WriteString("\n\n\n\f")
-
-	return []byte(sb.String()), nil
 }
 
-// Helpers for table formatting
-
-func calculateColWidths(widths []float64, totalWidth int) []int {
-	if len(widths) == 0 {
-		return []int{totalWidth}
-	}
-	colWidths := make([]int, len(widths))
-	sum := 0
-	for i, w := range widths {
-		c := int(w * float64(totalWidth))
-		if c < 1 {
-			c = 1
+// resolveTableLayout calcula anchos y alineaciones de columnas para un TableBlock.
+// Si Columns es nil, distribuye el ancho en partes iguales sin encabezado.
+func resolveTableLayout(block TableBlock, totalWidth int) (colWidths []int, colAligns []string) {
+	if len(block.Columns) == 0 {
+		n := 1
+		if len(block.Rows) > 0 && len(block.Rows[0].Cells) > 0 {
+			n = len(block.Rows[0].Cells)
 		}
-		colWidths[i] = c
-		sum += c
+		w := totalWidth / n
+		rem := totalWidth - w*n
+		for i := range n {
+			width := w
+			if i == n-1 {
+				width += rem
+			}
+			colWidths = append(colWidths, width)
+			colAligns = append(colAligns, "left")
+		}
+		return
+	}
+
+	sum := 0
+	for _, col := range block.Columns {
+		colAligns = append(colAligns, orDefault(col.Align, "left"))
+		w := int(col.Width * float64(totalWidth))
+		if w < 1 {
+			w = 1
+		}
+		colWidths = append(colWidths, w)
+		sum += w
 	}
 	if sum != totalWidth && len(colWidths) > 0 {
-		colWidths[len(colWidths)-1] += (totalWidth - sum)
+		colWidths[len(colWidths)-1] += totalWidth - sum
 	}
-	return colWidths
+	return
 }
 
+// hasTableHeaders devuelve true si al menos una columna tiene header no vacío.
+func hasTableHeaders(columns []TableColumn) bool {
+	for _, col := range columns {
+		if col.Header != nil && *col.Header != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// layoutColumnWidths calcula los anchos en caracteres para un bloque columns.
+func layoutColumnWidths(cols []ColumnsCell, totalWidth int) []int {
+	widths := make([]int, len(cols))
+	sum := 0
+	for i, col := range cols {
+		w := int(col.Width * float64(totalWidth))
+		if w < 1 {
+			w = 1
+		}
+		widths[i] = w
+		sum += w
+	}
+	if sum != totalWidth && len(widths) > 0 {
+		widths[len(widths)-1] += totalWidth - sum
+	}
+	return widths
+}
+
+// formatCol ajusta text al ancho colWidth con la alineación indicada.
 func formatCol(text string, colWidth int, align string) string {
 	if len(text) > colWidth {
 		return text[:colWidth]
@@ -321,148 +607,53 @@ func formatCol(text string, colWidth int, align string) string {
 	case "right":
 		return strings.Repeat(" ", pad) + text
 	case "center":
-		leftPad := pad / 2
-		rightPad := pad - leftPad
-		return strings.Repeat(" ", leftPad) + text + strings.Repeat(" ", rightPad)
+		left := pad / 2
+		return strings.Repeat(" ", left) + text + strings.Repeat(" ", pad-left)
 	default: // "left"
 		return text + strings.Repeat(" ", pad)
 	}
 }
 
+// formatColumns construye la línea de texto para un conjunto de columnas.
 func formatColumns(cols []string, colWidths []int, aligns []string) string {
 	var sb strings.Builder
 	for i, text := range cols {
-		align := "left"
-		if i < len(aligns) {
-			align = aligns[i]
+		if i >= len(colWidths) {
+			break
 		}
-		sb.WriteString(formatCol(text, colWidths[i], align))
+		sb.WriteString(formatCol(text, colWidths[i], colAlignAt(aligns, i)))
 	}
 	return sb.String()
 }
 
-func formatTableHeader(headers []string, widths []float64, aligns []string, totalWidth int) string {
-	colWidths := calculateColWidths(widths, totalWidth)
-	return formatColumns(headers, colWidths, aligns)
+// resolveAlign devuelve cellAlign si no está vacío, de lo contrario colAlign.
+func resolveAlign(cellAlign, colAlign string) string {
+	if cellAlign != "" {
+		return cellAlign
+	}
+	return colAlign
 }
 
-func formatTableRow(row map[string]any, headers []string, widths []float64, aligns []string, totalWidth int) string {
-	colWidths := calculateColWidths(widths, totalWidth)
-	cols := make([]string, len(headers))
-	for i, h := range headers {
-		cols[i] = getRowValue(row, h)
+// colAlignAt devuelve la alineación de la columna i, o "left" si está fuera de rango.
+func colAlignAt(aligns []string, i int) string {
+	if i < len(aligns) {
+		return aligns[i]
 	}
-	return formatColumns(cols, colWidths, aligns)
+	return "left"
 }
 
-func getRowValue(row map[string]any, header string) string {
-	h := strings.ToLower(header)
-	var keysToTry []string
-	if strings.Contains(h, "cant") || strings.Contains(h, "qty") {
-		keysToTry = []string{"cant", "cantidad", "qty", "cant."}
-	} else if strings.Contains(h, "prod") || strings.Contains(h, "desc") || strings.Contains(h, "det") || strings.Contains(h, "item") {
-		keysToTry = []string{"producto", "descripcion", "nombre", "nombre_producto", "item"}
-	} else if strings.Contains(h, "tot") || strings.Contains(h, "prec") || strings.Contains(h, "sub") || strings.Contains(h, "s/") || strings.Contains(h, "val") {
-		keysToTry = []string{"total", "precio", "subtotal", "valor"}
+// orDefault devuelve s si no está vacío, de lo contrario def.
+func orDefault(s, def string) string {
+	if s != "" {
+		return s
 	}
-
-	for _, k := range keysToTry {
-		if val, ok := row[k]; ok {
-			return fmt.Sprintf("%v", val)
-		}
-	}
-
-	if val, ok := row[h]; ok {
-		return fmt.Sprintf("%v", val)
-	}
-
-	return ""
+	return def
 }
 
-// Legacy Comanda rendering functions (fallback)
-
-func renderComandaText(payload string) ([]byte, error) {
-	var doc comandaDoc
-	if err := json.Unmarshal([]byte(payload), &doc); err != nil {
-		return nil, fmt.Errorf("parsear payload de comanda: %w", err)
+// positiveOrDefault devuelve n si es positivo, de lo contrario def.
+func positiveOrDefault(n, def int) int {
+	if n > 0 {
+		return n
 	}
-
-	const width = 48
-	now := time.Now()
-	sep := strings.Repeat("-", width)
-
-	center := func(s string) string {
-		if len(s) >= width {
-			return s
-		}
-		pad := (width - len(s)) / 2
-		return strings.Repeat(" ", pad) + s
-	}
-
-	var sb strings.Builder
-	sb.WriteString(center("RESTAURANTE USQAY") + "\n")
-	sb.WriteString(center(fmt.Sprintf("Mesa #%d", doc.Mesa)) + "\n")
-	sb.WriteString(sep + "\n")
-	sb.WriteString(fmt.Sprintf("Fecha: %s\n", now.Format("02/01/2006")))
-	sb.WriteString(fmt.Sprintf("Hora:  %s\n", now.Format("15:04:05")))
-	sb.WriteString(sep + "\n")
-	sb.WriteString(fmt.Sprintf("%-30s %3s %6s\n", "PRODUCTO", "CAN", "S/"))
-	sb.WriteString(sep + "\n")
-
-	var total float64
-	for _, item := range doc.Items {
-		subtotal := item.Precio * float64(item.Cantidad)
-		total += subtotal
-		if item.Precio > 0 {
-			sb.WriteString(fmt.Sprintf("%-30s %3d %6.2f\n", item.Nombre, item.Cantidad, subtotal))
-		} else {
-			sb.WriteString(fmt.Sprintf("%-30s %3d\n", item.Nombre, item.Cantidad))
-		}
-	}
-
-	sb.WriteString(sep + "\n")
-	if total > 0 {
-		sb.WriteString(center(fmt.Sprintf("TOTAL: S/ %.2f", total)) + "\n")
-	}
-	sb.WriteString("\n\n\n\f")
-
-	return []byte(sb.String()), nil
-}
-
-func renderComanda(payload string) ([]byte, error) {
-	var doc comandaDoc
-	if err := json.Unmarshal([]byte(payload), &doc); err != nil {
-		return nil, fmt.Errorf("parsear payload de comanda: %w", err)
-	}
-
-	const width = 32
-	now := time.Now()
-
-	b := escpos.New().
-		Center().Bold(true).Line("RESTAURANTE USQAY").Bold(false).
-		Center().Line(fmt.Sprintf("Mesa #%d", doc.Mesa)).
-		Left().Separator(width).
-		Left().Line(fmt.Sprintf("Fecha: %s", now.Format("02/01/2006"))).
-		Left().Line(fmt.Sprintf("Hora:  %s", now.Format("15:04:05"))).
-		Left().Separator(width).
-		Bold(true).Line(fmt.Sprintf("%-20s %3s %5s", "PRODUCTO", "CAN", "S/")).Bold(false).
-		Separator(width)
-
-	var total float64
-	for _, item := range doc.Items {
-		subtotal := item.Precio * float64(item.Cantidad)
-		total += subtotal
-		if item.Precio > 0 {
-			b.Line(fmt.Sprintf("%-20s %3d %5.2f", item.Nombre, item.Cantidad, subtotal))
-		} else {
-			b.Line(fmt.Sprintf("%-20s %3d", item.Nombre, item.Cantidad))
-		}
-	}
-
-	b.Separator(width)
-	if total > 0 {
-		b.Right().Bold(true).Line(fmt.Sprintf("TOTAL: S/ %.2f", total)).Bold(false)
-	}
-
-	return b.Feed(3).Cut().Bytes(), nil
+	return def
 }
