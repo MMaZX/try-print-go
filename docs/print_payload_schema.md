@@ -48,8 +48,8 @@ Define el tamaño físico del papel en milímetros.
 
 | Campo | Tipo | Requerido | Descripción |
 |---|---|---|---|
-| `ancho_dimension` | `number` (float) | Sí | Ancho del papel en mm (ej. `80.0` para papel estándar de 80mm, `58.0` para 58mm). Determina el ancho de caracteres virtuales en el agente (48 caracteres para 80mm, 32 caracteres para 58mm). |
-| `altura_dimension` | `number` (float) | Sí | Altura del papel. `0.0` representa papel continuo (rollo térmico). |
+| `ancho_dimension` | `number` (float) | Sí | Ancho del papel en mm (ej. `80.0`, `58.0`, o cualquier valor personalizado como `70.0`). El agente lo traduce por interpolación a caracteres por línea y a un comando físico `GS L`/`GS W` que restringe el área imprimible real de la impresora — ver [ancho-alto-papel-termico.md](./ancho-alto-papel-termico.md). |
+| `altura_dimension` | `number` (float) | Sí | Presente en el schema pero **no utilizado actualmente** por el agente (ver documento enlazado arriba para el porqué). `0.0` representa papel continuo (rollo térmico). |
 
 ---
 
