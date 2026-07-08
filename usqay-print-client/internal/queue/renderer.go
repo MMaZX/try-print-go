@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 
 	"usqay-print-client/internal/escpos"
@@ -13,8 +14,8 @@ import (
 
 // PrintPayload es el payload raíz de un trabajo de impresión.
 type PrintPayload struct {
-	Options PrintOptions  `json:"options"`
-	Margins PrintMargins  `json:"margins"`
+	Options PrintOptions      `json:"options"`
+	Margins PrintMargins      `json:"margins"`
 	Body    []json.RawMessage `json:"body"`
 }
 
@@ -145,10 +146,11 @@ func renderText(_, payload string) ([]byte, error) {
 
 func renderStructured(payload PrintPayload) ([]byte, error) {
 	b := escpos.New()
+	dots, width := paperGeometry(payload.Margins.AnchoDimension)
+	b.PrintAreaWidth(dots)
 	if payload.Options.Drawer {
 		b.Drawer()
 	}
-	width := pageWidth(payload.Margins.AnchoDimension)
 
 	for _, raw := range payload.Body {
 		var env blockEnvelope
@@ -493,12 +495,46 @@ func renderColumnsText(sb *strings.Builder, block ColumnsBlock, totalWidth int) 
 
 // --- Helpers de layout ---
 
+// Anclas de calibración conocidas para rollos térmicos ESC/POS estándar:
+// ancho nominal de papel (mm) → área imprimible real en dots (fuente A,
+// 203dpi). Estos valores no son un simple mm×dots_por_mm porque el área
+// imprimible real descuenta el margen mecánico no imprimible del cabezal;
+// son los que documentan los fabricantes (Epson, etc.) para 58mm y 80mm.
+const (
+	anchoRef1MM, dotsRef1 = 58.0, 384.0
+	anchoRef2MM, dotsRef2 = 80.0, 576.0
+	dotsPerChar           = 12 // ancho de celda de carácter, fuente A tamaño normal
+)
+
+// paperGeometry calcula el ancho imprimible en dots y en caracteres a partir
+// del ancho de papel en mm que llega en el payload (ancho_dimension). Es un
+// cálculo continuo por interpolación/extrapolación lineal entre las dos
+// anclas conocidas (58mm y 80mm) — no un snap a un valor fijo — para que
+// anchos personalizados (62, 70, 76, 90mm...) definidos desde el frontend se
+// reflejen proporcionalmente en vez de perderse dentro de un bucket.
+//
+// Si el resultado excede el área imprimible real del cabezal físico, la
+// propia impresora recorta el exceso al recibir GS W (ver
+// escpos.PrintAreaWidth), así que extrapolar fuera de 58–80mm es seguro,
+// aunque pierde precisión mientras más lejos de ese rango esté el valor.
+func paperGeometry(anchoDimMM float64) (dots, chars int) {
+	if anchoDimMM <= 0 {
+		anchoDimMM = anchoRef1MM // sin configurar: usar el ancho térmico más angosto conocido (58mm) por seguridad
+	}
+	frac := (anchoDimMM - anchoRef1MM) / (anchoRef2MM - anchoRef1MM)
+	d := dotsRef1 + frac*(dotsRef2-dotsRef1)
+	dots = int(math.Round(d))
+	if dots < dotsPerChar {
+		dots = dotsPerChar
+	}
+	chars = dots / dotsPerChar
+	return dots, chars
+}
+
 // pageWidth devuelve el ancho en caracteres según el ancho físico del papel.
 func pageWidth(anchoDim float64) int {
-	if anchoDim > 60 {
-		return 48
-	}
-	return 32
+	_, chars := paperGeometry(anchoDim)
+	return chars
 }
 
 // applyAlign emite el comando ESC/POS de alineación correspondiente.

@@ -7,7 +7,7 @@ import (
 
 // Standard ESC/POS command bytes.
 var (
-	cmdInit        = []byte{0x1B, 0x40}            // ESC @ — initialize printer
+	cmdInit        = []byte{0x1B, 0x40}             // ESC @ — initialize printer
 	cmdBoldOn      = []byte{0x1B, 0x45, 0x01}       // ESC E 1 — bold on
 	cmdBoldOff     = []byte{0x1B, 0x45, 0x00}       // ESC E 0 — bold off
 	cmdAlignLeft   = []byte{0x1B, 0x61, 0x00}       // ESC a 0 — left
@@ -77,6 +77,25 @@ func (b *Builder) Separator(width int) *Builder {
 
 // Cut appends a partial paper cut command.
 func (b *Builder) Cut() *Builder { return b.raw(cmdCutPartial) }
+
+// PrintAreaWidth constrains the physical printable area to widthDots, measured
+// from a left margin of 0 (GS L) to widthDots (GS W). This is what actually
+// tells the printer hardware how wide the paper is — without it, the printer
+// always uses its full head width regardless of the configured paper size.
+// Needed when a wider print head (e.g. 80mm) has narrower paper installed
+// (e.g. 58mm): without this, content is laid out for 58mm in software but the
+// printer still prints across its full 80mm head.
+func (b *Builder) PrintAreaWidth(widthDots int) *Builder {
+	nL, nH := lowHighBytes(widthDots)
+	b.raw([]byte{0x1D, 0x4C, 0x00, 0x00})    // GS L 0 0 — left margin = 0
+	return b.raw([]byte{0x1D, 0x57, nL, nH}) // GS W nL nH — print area width
+}
+
+// lowHighBytes splits n into the little-endian (nL, nH) byte pair used by
+// two-byte ESC/POS numeric parameters.
+func lowHighBytes(n int) (nL, nH byte) {
+	return byte(n & 0xFF), byte((n >> 8) & 0xFF)
+}
 
 // Drawer sends a cash drawer opening pulse.
 func (b *Builder) Drawer() *Builder {

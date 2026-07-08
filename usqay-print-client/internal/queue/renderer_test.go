@@ -1,6 +1,8 @@
 package queue
 
 import (
+	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -407,15 +409,64 @@ func TestPageWidth(t *testing.T) {
 	}{
 		{80.0, 48},
 		{58.0, 32},
-		{0.0, 32},
-		{60.1, 48},
-		{60.0, 32},
+		{0.0, 32},   // sin configurar: fallback seguro al ancho más angosto conocido (58mm)
+		{70.0, 40},  // valor intermedio personalizado: interpolado, no un bucket fijo
+		{62.0, 34},  // otro valor intermedio, distinto de 70mm
+		{100.0, 62}, // fuera de rango: se extrapola con la misma pendiente
 	}
 	for _, tc := range tests {
 		got := pageWidth(tc.dim)
 		if got != tc.expected {
 			t.Errorf("pageWidth(%v) = %d, want %d", tc.dim, got, tc.expected)
 		}
+	}
+}
+
+func TestPaperGeometryDots(t *testing.T) {
+	tests := []struct {
+		dim      float64
+		wantDots int
+	}{
+		{58.0, 384},
+		{80.0, 576},
+		{70.0, 489}, // interpolado entre las dos anclas: distinto de 58 y de 80
+		{62.0, 419},
+	}
+	for _, tc := range tests {
+		dots, _ := paperGeometry(tc.dim)
+		if dots != tc.wantDots {
+			t.Errorf("paperGeometry(%v).dots = %d, want %d", tc.dim, dots, tc.wantDots)
+		}
+	}
+}
+
+// TestRenderStructuredEmitsPrintAreaWidth verifica que el comando físico
+// GS L/GS W se emita con el ancho en dots correspondiente al ancho_dimension
+// recibido, incluyendo valores personalizados que no son 58 ni 80mm exactos,
+// para que la impresora respete realmente el ancho configurado en el JSON.
+func TestRenderStructuredEmitsPrintAreaWidth(t *testing.T) {
+	tests := []struct {
+		name      string
+		anchoDim  float64
+		wantBytes []byte
+	}{
+		{"58mm", 58.0, []byte{0x1D, 0x4C, 0x00, 0x00, 0x1D, 0x57, 0x80, 0x01}},        // 384 = 0x0180
+		{"80mm", 80.0, []byte{0x1D, 0x4C, 0x00, 0x00, 0x1D, 0x57, 0x40, 0x02}},        // 576 = 0x0240
+		{"70mm custom", 70.0, []byte{0x1D, 0x4C, 0x00, 0x00, 0x1D, 0x57, 0xE9, 0x01}}, // 489 = 0x01E9
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := fmt.Sprintf(`{
+				"options": {"cut": false, "drawer": false},
+				"margins": {"ancho_dimension": %v, "altura_dimension": 0.0},
+				"body": [{"type": "text", "value": "x"}]
+			}`, tc.anchoDim)
+
+			data := mustRenderESCPOS(t, payload)
+			if !bytes.Contains(data, tc.wantBytes) {
+				t.Errorf("esperaba encontrar comando GS L/GS W %x en la salida, got %x", tc.wantBytes, data)
+			}
+		})
 	}
 }
 
