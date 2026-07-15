@@ -161,7 +161,6 @@ func resolveActiveProfile(prof *printer.DeviceProfile, margins PrintMargins) pri
 }
 
 func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte, error) {
-	b := escpos.New()
 	activeProf := resolveActiveProfile(prof, payload.Margins)
 	dots := activeProf.WidthDots
 	charWidth := activeProf.CharWidthDots
@@ -169,25 +168,38 @@ func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte
 		charWidth = 12
 	}
 
+	// 1. Calcular geometría física (encuadre y márgenes)
+	anchoPapelMM := payload.Margins.DimensionPapel
+	if anchoPapelMM <= 0 {
+		anchoPapelMM = payload.Margins.AnchoDimension
+	}
+	totalPaperDots := dots // fallback
+	payloadDots, _ := paperGeometry(anchoPapelMM)
+	if payloadDots > 0 {
+		totalPaperDots = payloadDots
+	}
+
 	leftMarginDots := 0
 	printWidthDots := dots
 
+	// Si el papel físico del payload es más ancho que la impresora del perfil, centramos
+	if totalPaperDots > dots {
+		leftMarginDots = (totalPaperDots - dots) / 2
+	}
+
+	// Aplicar padding del margins en dots
 	if payload.Margins.Padding > 0 {
 		paddingDots := int(math.Round(payload.Margins.Padding * 8.0))
-		leftMarginDots = paddingDots
-		printWidthDots = dots - (2 * paddingDots)
+		leftMarginDots += paddingDots
+		printWidthDots -= 2 * paddingDots
 		if printWidthDots < 96 { // límite de seguridad (min 8 caracteres)
 			printWidthDots = 96
 		}
 	}
 	width := printWidthDots / charWidth
-	if activeProf.SupportsPrintArea {
-		b.PrintAreaWidthWithMargin(leftMarginDots, printWidthDots)
-	}
 
-	if payload.Options.Drawer && activeProf.SupportsDrawer {
-		b.Drawer()
-	}
+	// 2. Construir la lista de bloques IR (Paso de Parsing/Measure)
+	var irBlocks []IRBlock
 
 	for _, raw := range payload.Body {
 		var env blockEnvelope
@@ -203,20 +215,26 @@ func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte
 				slog.Warn("skip bloque text inválido", "err", err)
 				continue
 			}
-			applyAlign(b, block.Align)
-			b.Bold(block.Bold).Size(block.Size).Line(block.Value)
-			b.Bold(false).Size("normal")
+			irBlocks = append(irBlocks, &IRText{
+				Value: block.Value,
+				Align: block.Align,
+				Bold:  block.Bold,
+				Size:  block.Size,
+			})
 
 		case "separator":
 			var block SeparatorBlock
-			json.Unmarshal(raw, &block) //nolint:errcheck // todos los campos son opcionales
-			char := orDefault(block.Character, "-")
-			b.Left().Line(strings.Repeat(char, width))
+			json.Unmarshal(raw, &block) //nolint:errcheck
+			irBlocks = append(irBlocks, &IRSeparator{
+				Character: block.Character,
+			})
 
 		case "spacer":
 			var block SpacerBlock
-			json.Unmarshal(raw, &block) //nolint:errcheck // todos los campos son opcionales
-			b.Feed(positiveOrDefault(block.Lines, 1))
+			json.Unmarshal(raw, &block) //nolint:errcheck
+			irBlocks = append(irBlocks, &IRSpacer{
+				Lines: block.Lines,
+			})
 
 		case "table":
 			var block TableBlock
@@ -224,7 +242,10 @@ func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte
 				slog.Warn("skip bloque table inválido", "err", err)
 				continue
 			}
-			renderTableESCPOS(b, block, width)
+			irBlocks = append(irBlocks, &IRTable{
+				Columns: block.Columns,
+				Rows:    block.Rows,
+			})
 
 		case "columns":
 			var block ColumnsBlock
@@ -232,7 +253,9 @@ func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte
 				slog.Warn("skip bloque columns inválido", "err", err)
 				continue
 			}
-			renderColumnsESCPOS(b, block, width)
+			irBlocks = append(irBlocks, &IRColumns{
+				Columns: block.Columns,
+			})
 
 		case "qr":
 			var block QRBlock
@@ -240,13 +263,12 @@ func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte
 				slog.Warn("skip bloque qr inválido", "err", err)
 				continue
 			}
-			applyAlign(b, block.Align)
-			if activeProf.SupportsQRNative {
-				b.QR(block.Value, positiveOrDefault(block.Size, 6))
-			} else {
-				b.Line("[QR: " + block.Value + "]")
-			}
-			b.Left()
+			irBlocks = append(irBlocks, &IRQR{
+				Value:    block.Value,
+				Align:    block.Align,
+				Size:     block.Size,
+				NativeQR: activeProf.SupportsQRNative,
+			})
 
 		case "barcode":
 			var block BarcodeBlock
@@ -254,23 +276,54 @@ func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte
 				slog.Warn("skip bloque barcode inválido", "err", err)
 				continue
 			}
-			applyAlign(b, block.Align)
-			b.Barcode(block.Symbology, block.Value, block.Height, block.Width, block.HRI)
-			b.Left()
+			irBlocks = append(irBlocks, &IRBarcode{
+				Symbology: block.Symbology,
+				Value:     block.Value,
+				Align:     block.Align,
+				Height:    block.Height,
+				Width:     block.Width,
+				HRI:       block.HRI,
+			})
 
 		case "image":
-			slog.Warn("bloque image aún no implementado, saltando")
+			irBlocks = append(irBlocks, &IRImage{
+				Data:           "",
+				Align:          "center",
+				Width:          0,
+				SupportsRaster: activeProf.SupportsRaster,
+			})
 
 		default:
 			slog.Warn("tipo de bloque desconocido, saltando", "type", env.Type)
 		}
 	}
 
+	// 3. Posicionamiento (Arrange / Render)
+	b := escpos.New()
+
+	// Enviar comando nativo de área de impresión
+	if activeProf.SupportsPrintArea {
+		b.PrintAreaWidthWithMargin(leftMarginDots, printWidthDots)
+	}
+
+	// Abrir cajón si está configurado
+	if payload.Options.Drawer && activeProf.SupportsDrawer {
+		b.Drawer()
+	}
+
+	// Ejecutar Measure y Render en cada bloque
+	for _, ir := range irBlocks {
+		ir.Measure(width)
+		ir.Render(b, width)
+	}
+
+	// Cortar papel o avanzar líneas
 	if payload.Options.Cut && activeProf.SupportsCut {
 		b.Feed(3).Cut()
 	} else {
 		b.Feed(3)
 	}
+
 	return b.Bytes(), nil
 }
 

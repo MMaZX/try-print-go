@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"usqay-print-client/internal/printer"
 )
 
 // --- helpers de test ---
@@ -472,6 +474,30 @@ func TestRenderStructuredEmitsPrintAreaWidth(t *testing.T) {
 	}
 }
 
+func TestRenderStructuredCentersNarrowProfile(t *testing.T) {
+	profile := &printer.DeviceProfile{
+		WidthDots:         384, // 58mm
+		CharWidthDots:     12,
+		SupportsPrintArea: true,
+	}
+	// Payload asks for 80mm paper (576 dots)
+	payload := `{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"body": [{"type": "text", "value": "x"}]
+	}`
+	data, err := render(profile, payload)
+	if err != nil {
+		t.Fatalf("render falló: %v", err)
+	}
+	// leftMarginDots = (576 - 384) / 2 = 96 dots = 0x60, 0x00
+	// printWidthDots = 384 dots = 0x80, 0x01
+	wantBytes := []byte{0x1D, 0x4C, 0x60, 0x00, 0x1D, 0x57, 0x80, 0x01}
+	if !bytes.Contains(data, wantBytes) {
+		t.Errorf("esperaba encontrar comandos de centrado %x en la salida, got %x", wantBytes, data)
+	}
+}
+
 // --- Error handling ---
 
 func TestRenderInvalidPayload(t *testing.T) {
@@ -539,6 +565,7 @@ func TestGoldenSuite(t *testing.T) {
 	tests := []struct {
 		name    string
 		payload string
+		profile *printer.DeviceProfile
 	}{
 		{
 			name: "ticket_80_no_padding",
@@ -671,6 +698,34 @@ func TestGoldenSuite(t *testing.T) {
 				]
 			}`,
 		},
+		{
+			name: "ticket_58_profile_on_80_paper",
+			profile: &printer.DeviceProfile{
+				WidthDots:         384,
+				DPI:               203,
+				CharWidthDots:     12,
+				SupportsCut:       true,
+				SupportsDrawer:    true,
+				SupportsQRNative:  true,
+				SupportsPrintArea: true,
+				SupportsRaster:    true,
+			},
+			payload: `{
+				"options": {"cut": true, "drawer": true},
+				"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0, "padding": 0.0},
+				"body": [
+					{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
+					{"type": "separator", "character": "="},
+					{
+						"type": "columns",
+						"columns": [
+							{"text": "Mesa: 5",          "width": 0.5, "align": "left"},
+							{"text": "12/06/2026 14:30", "width": 0.5, "align": "right"}
+						]
+					}
+				]
+			}`,
+		},
 	}
 
 	updateGolden := os.Getenv("UPDATE_GOLDEN") == "true"
@@ -684,7 +739,7 @@ func TestGoldenSuite(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotBytes, err := render(nil, tc.payload)
+			gotBytes, err := render(tc.profile, tc.payload)
 			if err != nil {
 				t.Fatalf("render falló: %v", err)
 			}
