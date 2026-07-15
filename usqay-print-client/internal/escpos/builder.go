@@ -213,5 +213,21 @@ func (b *Builder) Barcode(symbology, value string, height, width int, hri string
 	return b
 }
 
+// RasterImage prints a monochrome raster image using GS v 0.
+// m is the mode (0=normal, 1=double width, 2=double height, 3=quadruple).
+// widthDots is the image width in dots (must match the width of data/8).
+// heightDots is the image height in dots.
+// data is the monochrome raster byte data.
+func (b *Builder) RasterImage(m int, widthDots, heightDots int, data []byte) *Builder {
+	widthBytes := (widthDots + 7) / 8
+	xL := byte(widthBytes & 0xFF)
+	xH := byte((widthBytes >> 8) & 0xFF)
+	yL := byte(heightDots & 0xFF)
+	yH := byte((heightDots >> 8) & 0xFF)
+	b.raw([]byte{0x1D, 0x76, 0x30, byte(m), xL, xH, yL, yH})
+	b.raw(data)
+	return b
+}
+
 // Bytes returns the accumulated ESC/POS byte sequence.
 func (b *Builder) Bytes() []byte { return b.buf }

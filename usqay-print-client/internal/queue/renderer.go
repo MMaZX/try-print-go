@@ -119,6 +119,14 @@ type BarcodeBlock struct {
 	HRI       string `json:"hri"`
 }
 
+// ImageBlock representa un bloque type:"image".
+type ImageBlock struct {
+	Data   string `json:"data"`
+	Align  string `json:"align,omitempty"`
+	Width  int    `json:"width,omitempty"`
+	Dither bool   `json:"dither,omitempty"`
+}
+
 // --- Puntos de entrada ---
 
 // render convierte un payload JSON a bytes ESC/POS para impresoras térmicas.
@@ -286,10 +294,16 @@ func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte
 			})
 
 		case "image":
+			var block ImageBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				slog.Warn("skip bloque image inválido", "err", err)
+				continue
+			}
 			irBlocks = append(irBlocks, &IRImage{
-				Data:           "",
-				Align:          "center",
-				Width:          0,
+				Data:           block.Data,
+				Align:          orDefault(block.Align, "center"),
+				Width:          block.Width,
+				Dither:         block.Dither,
 				SupportsRaster: activeProf.SupportsRaster,
 			})
 

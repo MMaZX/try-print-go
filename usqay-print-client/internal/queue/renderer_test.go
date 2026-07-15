@@ -2,7 +2,11 @@ package queue
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -763,5 +767,49 @@ func TestGoldenSuite(t *testing.T) {
 				t.Errorf("diferencia de bytes detectada respecto a golden file %s\ngot %d bytes, want %d bytes", goldenPath, len(gotBytes), len(wantBytes))
 			}
 		})
+	}
+}
+
+func TestRenderStructuredImage(t *testing.T) {
+	// Dynamically generate a 1x1 black PNG image
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.Black)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("error encoding png: %v", err)
+	}
+	b64Image := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	profile := &printer.DeviceProfile{
+		WidthDots:      384,
+		CharWidthDots:  12,
+		SupportsRaster: true,
+	}
+
+	payload := fmt.Sprintf(`{
+		"options": {"cut": false, "drawer": false},
+		"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0},
+		"body": [
+			{
+				"type": "image",
+				"data": "%s",
+				"align": "center",
+				"width": 8
+			}
+		]
+	}`, b64Image)
+
+	data, err := render(profile, payload)
+	if err != nil {
+		t.Fatalf("render falló: %v", err)
+	}
+
+	// targetW = 8 dots, targetH = 8 dots.
+	// widthBytes = 1, xL = 1, xH = 0
+	// yL = 8, yH = 0
+	// command = 1D 76 30 00 01 00 08 00
+	wantBytes := []byte{0x1D, 0x76, 0x30, 0x00, 0x01, 0x00, 0x08, 0x00}
+	if !bytes.Contains(data, wantBytes) {
+		t.Errorf("esperaba encontrar comando GS v 0 %x en la salida, got %x", wantBytes, data)
 	}
 }

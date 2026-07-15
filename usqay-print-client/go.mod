@@ -5,11 +5,14 @@ go 1.26.2
 require (
 	github.com/alexbrainman/printer v0.0.0-20200912035444-f40f26f0bdeb
 	github.com/coder/websocket v1.8.14
+	github.com/fogleman/gg v1.3.0
+	golang.org/x/image v0.44.0
 	modernc.org/sqlite v1.52.0
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
