@@ -8,6 +8,7 @@ import (
 // Standard ESC/POS command bytes.
 var (
 	cmdInit        = []byte{0x1B, 0x40}             // ESC @ — initialize printer
+	cmdCodePage    = []byte{0x1B, 0x74, 0x02}       // ESC t 2 — code table PC850 (ver encoding.go)
 	cmdBoldOn      = []byte{0x1B, 0x45, 0x01}       // ESC E 1 — bold on
 	cmdBoldOff     = []byte{0x1B, 0x45, 0x00}       // ESC E 0 — bold off
 	cmdAlignLeft   = []byte{0x1B, 0x61, 0x00}       // ESC a 0 — left
@@ -22,10 +23,12 @@ type Builder struct {
 	buf []byte
 }
 
-// New returns a Builder pre-seeded with the ESC @ initialize command.
+// New returns a Builder pre-seeded with the ESC @ initialize command and the
+// PC850 code table selection so accented text renders correctly.
 func New() *Builder {
 	b := &Builder{}
 	b.buf = append(b.buf, cmdInit...)
+	b.buf = append(b.buf, cmdCodePage...)
 	return b
 }
 
@@ -51,9 +54,11 @@ func (b *Builder) Center() *Builder { return b.raw(cmdAlignCenter) }
 // Right sets right text alignment.
 func (b *Builder) Right() *Builder { return b.raw(cmdAlignRight) }
 
-// Text appends s without a newline.
+// Text appends s without a newline, transcoding UTF-8 to CP850 so accented
+// characters match the code table selected in New(). QR and barcode payloads
+// do NOT pass through here — they go as raw bytes on purpose.
 func (b *Builder) Text(s string) *Builder {
-	b.buf = append(b.buf, []byte(s)...)
+	b.buf = append(b.buf, encodeCP850(s)...)
 	return b
 }
 
@@ -86,8 +91,16 @@ func (b *Builder) Cut() *Builder { return b.raw(cmdCutPartial) }
 // (e.g. 58mm): without this, content is laid out for 58mm in software but the
 // printer still prints across its full 80mm head.
 func (b *Builder) PrintAreaWidth(widthDots int) *Builder {
+	return b.PrintAreaWidthWithMargin(0, widthDots)
+}
+
+// PrintAreaWidthWithMargin constrains the physical printable area to widthDots
+// starting from leftMarginDots. Uses GS L to set left margin and GS W to set
+// print width.
+func (b *Builder) PrintAreaWidthWithMargin(leftMarginDots, widthDots int) *Builder {
+	lL, lH := lowHighBytes(leftMarginDots)
 	nL, nH := lowHighBytes(widthDots)
-	b.raw([]byte{0x1D, 0x4C, 0x00, 0x00})    // GS L 0 0 — left margin = 0
+	b.raw([]byte{0x1D, 0x4C, lL, lH})        // GS L lL lH — left margin
 	return b.raw([]byte{0x1D, 0x57, nL, nH}) // GS W nL nH — print area width
 }
 

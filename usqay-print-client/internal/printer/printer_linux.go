@@ -78,7 +78,9 @@ func (p *SystemPrinter) printText(data []byte) error {
 	}
 	defer devNull.Close()
 
-	cmd := exec.Command("lp", "-d", p.name, "-o", "media=A4", f.Name())
+	// Sin -o media: el tamaño de papel lo decide la cola CUPS (lpadmin/PPD),
+	// que es quien conoce el papel realmente instalado en cada impresora.
+	cmd := exec.Command("lp", "-d", p.name, f.Name())
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
 	if err := cmd.Run(); err != nil {

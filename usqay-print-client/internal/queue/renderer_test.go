@@ -499,3 +499,36 @@ func TestRenderUnknownBlockSkipped(t *testing.T) {
 	text := mustRenderText(t, payload)
 	assertContains(t, text, "visible")
 }
+
+func TestFormatColCuentaRunas(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		colWidth int
+		align    string
+		want     string
+	}{
+		{"tilde no desalinea a la izquierda", "Café", 8, "left", "Café    "},
+		{"tilde no desalinea a la derecha", "Café", 8, "right", "    Café"},
+		{"tilde no desalinea centrado", "Añejo", 9, "center", "  Añejo  "},
+		{"truncado no parte runa multibyte", "Añejo", 3, "left", "Añe"},
+		{"ascii intacto", "Total", 7, "left", "Total  "},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatCol(tc.text, tc.colWidth, tc.align); got != tc.want {
+				t.Errorf("formatCol(%q, %d, %q) = %q, want %q", tc.text, tc.colWidth, tc.align, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyAlignTextCuentaRunas(t *testing.T) {
+	// "Café" son 4 runas: centrado en 10 debe dejar 3 espacios, no 2.
+	if got := applyAlignText("Café", "center", 10); got != "   Café" {
+		t.Errorf("center = %q, want %q", got, "   Café")
+	}
+	if got := applyAlignText("Café", "right", 10); got != "      Café" {
+		t.Errorf("right = %q, want %q", got, "      Café")
+	}
+}

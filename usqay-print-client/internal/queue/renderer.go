@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	"usqay-print-client/internal/escpos"
 )
@@ -25,10 +26,12 @@ type PrintOptions struct {
 	Drawer bool `json:"drawer"`
 }
 
-// PrintMargins define el tamaño físico del papel.
+// PrintMargins define el tamaño físico del papel y márgenes.
 type PrintMargins struct {
-	AnchoDimension  float64 `json:"ancho_dimension"`
+	DimensionPapel  float64 `json:"dimension_papel"`
+	AnchoDimension  float64 `json:"ancho_dimension"` // Legado/fallback
 	AlturaDimension float64 `json:"altura_dimension"`
+	Padding         float64 `json:"padding"`
 }
 
 // blockEnvelope inspecciona el campo type sin deserializar el bloque completo.
@@ -146,8 +149,26 @@ func renderText(_, payload string) ([]byte, error) {
 
 func renderStructured(payload PrintPayload) ([]byte, error) {
 	b := escpos.New()
-	dots, width := paperGeometry(payload.Margins.AnchoDimension)
-	b.PrintAreaWidth(dots)
+	anchoPapelMM := payload.Margins.DimensionPapel
+	if anchoPapelMM <= 0 {
+		anchoPapelMM = payload.Margins.AnchoDimension
+	}
+	dots, _ := paperGeometry(anchoPapelMM)
+
+	leftMarginDots := 0
+	printWidthDots := dots
+
+	if payload.Margins.Padding > 0 {
+		paddingDots := int(math.Round(payload.Margins.Padding * 8.0))
+		leftMarginDots = paddingDots
+		printWidthDots = dots - (2 * paddingDots)
+		if printWidthDots < 96 { // límite de seguridad (min 8 caracteres)
+			printWidthDots = 96
+		}
+	}
+	width := printWidthDots / dotsPerChar
+	b.PrintAreaWidthWithMargin(leftMarginDots, printWidthDots)
+
 	if payload.Options.Drawer {
 		b.Drawer()
 	}
@@ -377,7 +398,20 @@ func renderColumnsESCPOS(b *escpos.Builder, block ColumnsBlock, totalWidth int) 
 // --- Renderer de texto plano ---
 
 func renderStructuredText(payload PrintPayload) ([]byte, error) {
-	width := pageWidth(payload.Margins.AnchoDimension)
+	anchoPapelMM := payload.Margins.DimensionPapel
+	if anchoPapelMM <= 0 {
+		anchoPapelMM = payload.Margins.AnchoDimension
+	}
+	dots, _ := paperGeometry(anchoPapelMM)
+
+	if payload.Margins.Padding > 0 {
+		paddingDots := int(math.Round(payload.Margins.Padding * 8.0))
+		dots = dots - (2 * paddingDots)
+		if dots < 96 {
+			dots = 96
+		}
+	}
+	width := dots / dotsPerChar
 	var sb strings.Builder
 
 	for _, raw := range payload.Body {
@@ -550,19 +584,21 @@ func applyAlign(b *escpos.Builder, align string) {
 }
 
 // applyAlignText aplica alineación a un string para el renderer de texto plano.
+// Cuenta runas (no bytes) por el mismo motivo que formatCol.
 func applyAlignText(s, align string, width int) string {
+	n := utf8.RuneCountInString(s)
 	switch align {
 	case "center":
-		if len(s) >= width {
+		if n >= width {
 			return s
 		}
-		pad := (width - len(s)) / 2
+		pad := (width - n) / 2
 		return strings.Repeat(" ", pad) + s
 	case "right":
-		if len(s) >= width {
+		if n >= width {
 			return s
 		}
-		return strings.Repeat(" ", width-len(s)) + s
+		return strings.Repeat(" ", width-n) + s
 	default:
 		return s
 	}
@@ -634,11 +670,14 @@ func layoutColumnWidths(cols []ColumnsCell, totalWidth int) []int {
 }
 
 // formatCol ajusta text al ancho colWidth con la alineación indicada.
+// Cuenta runas (no bytes) para que texto acentuado no desalinee las columnas:
+// en la impresora cada runa ocupa exactamente una celda tras transcodificar a CP850.
 func formatCol(text string, colWidth int, align string) string {
-	if len(text) > colWidth {
-		return text[:colWidth]
+	runes := []rune(text)
+	if len(runes) > colWidth {
+		return string(runes[:colWidth])
 	}
-	pad := colWidth - len(text)
+	pad := colWidth - len(runes)
 	switch align {
 	case "right":
 		return strings.Repeat(" ", pad) + text

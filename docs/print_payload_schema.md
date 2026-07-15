@@ -20,8 +20,9 @@ El JSON de impresión consta de tres secciones principales:
     "drawer": false
   },
   "margins": {
-    "ancho_dimension": 80.0,
-    "altura_dimension": 0.0
+    "dimension_papel": 80.0,
+    "altura_dimension": 0.0,
+    "padding": 2.0
   },
   "body": [
     // Array de bloques...
@@ -44,12 +45,14 @@ Define el comportamiento del hardware antes o después de procesar el cuerpo del
 
 ## 2. Márgenes (`margins`)
 
-Define el tamaño físico del papel en milímetros.
+Define el tamaño físico del papel y los márgenes en milímetros.
 
 | Campo | Tipo | Requerido | Descripción |
 |---|---|---|---|
-| `ancho_dimension` | `number` (float) | Sí | Ancho del papel en mm (ej. `80.0`, `58.0`, o cualquier valor personalizado como `70.0`). El agente lo traduce por interpolación a caracteres por línea y a un comando físico `GS L`/`GS W` que restringe el área imprimible real de la impresora — ver [ancho-alto-papel-termico.md](./ancho-alto-papel-termico.md). |
-| `altura_dimension` | `number` (float) | Sí | Presente en el schema pero **no utilizado actualmente** por el agente (ver documento enlazado arriba para el porqué). `0.0` representa papel continuo (rollo térmico). |
+| `dimension_papel` | `number` (float) | Sí (o `ancho_dimension`) | Ancho físico del papel en mm (ej. `80.0`, `58.0`). Reemplaza al campo legado `ancho_dimension`. |
+| `ancho_dimension` | `number` (float) | No (Legado) | Campo antiguo para compatibilidad hacia atrás. Si está presente y `dimension_papel` está vacío, se usa este valor. |
+| `altura_dimension` | `number` (float) | Sí | Presente en el schema pero **no utilizado actualmente** por el agente. `0.0` representa papel continuo (rollo térmico). |
+| `padding` | `number` (float) | No | Espaciado interno en mm a aplicar a la izquierda y derecha. Sirve para centrar texto o evitar que se corte en los bordes. Por defecto `0.0`. |
 
 ---
 
