@@ -3,6 +3,8 @@ package queue
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"usqay-print-client/internal/printer"
@@ -18,15 +20,23 @@ type NotifyFunc func(jobID string, estado Estado, errMsg string)
 // It runs until ctx is cancelled. No error ever causes a panic — all failures
 // are logged and persisted as ERROR state so the queue remains operational.
 type Worker struct {
-	repo     *Repository
-	registry *printer.Registry
-	notify   NotifyFunc // may be nil
+	repo          *Repository
+	registry      *printer.Registry
+	notify        NotifyFunc // may be nil
+	capturePRN    bool
+	capturePRNDir string
 }
 
 // NewWorker creates a Worker backed by repo and the printer registry.
 // notify is called after each job reaches PRINTED or ERROR; pass nil to skip.
-func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc) *Worker {
-	return &Worker{repo: repo, registry: registry, notify: notify}
+func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc, capturePRN bool, capturePRNDir string) *Worker {
+	return &Worker{
+		repo:          repo,
+		registry:      registry,
+		notify:        notify,
+		capturePRN:    capturePRN,
+		capturePRNDir: capturePRNDir,
+	}
 }
 
 // Run blocks, polling for PENDING jobs every 500ms, until ctx is done.
@@ -94,6 +104,19 @@ func (w *Worker) processNext() {
 		slog.Error("error renderizando payload", "src", "WORKER", "job_id", job.ID, "error", renderErr)
 		w.finalize(job.ID, EstadoError, renderErr.Error())
 		return
+	}
+
+	if w.capturePRN && w.capturePRNDir != "" {
+		if err := os.MkdirAll(w.capturePRNDir, 0755); err != nil {
+			slog.Error("error creando directorio de captura PRN", "src", "WORKER", "dir", w.capturePRNDir, "error", err)
+		} else {
+			filePath := filepath.Join(w.capturePRNDir, job.ID+".prn")
+			if err := os.WriteFile(filePath, data, 0644); err != nil {
+				slog.Error("error escribiendo captura PRN", "src", "WORKER", "path", filePath, "error", err)
+			} else {
+				slog.Info("captura de bytes PRN guardada", "src", "WORKER", "path", filePath)
+			}
+		}
 	}
 
 	start := time.Now()

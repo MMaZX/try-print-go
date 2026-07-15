@@ -1,5 +1,6 @@
 {
   "server_url": "ws://127.0.0.1:8090/ws",
   "token": "agt_hEFvct6FlddLQ0FGxFYRUDBwhVQLlHID5JYJRdUiLyYxk2lN",
-  "log_level": "info"
+  "log_level": "info",
+  "capture_prn": true
 }

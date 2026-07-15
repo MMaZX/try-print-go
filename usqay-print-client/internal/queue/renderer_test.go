@@ -3,6 +3,8 @@ package queue
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -530,5 +532,181 @@ func TestApplyAlignTextCuentaRunas(t *testing.T) {
 	}
 	if got := applyAlignText("Café", "right", 10); got != "      Café" {
 		t.Errorf("right = %q, want %q", got, "      Café")
+	}
+}
+
+func TestGoldenSuite(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name: "ticket_80_no_padding",
+			payload: `{
+				"options": {"cut": true, "drawer": true},
+				"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0, "padding": 0.0},
+				"body": [
+					{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
+					{"type": "separator", "character": "="},
+					{
+						"type": "columns",
+						"columns": [
+							{"text": "Mesa: 5",          "width": 0.5, "align": "left"},
+							{"text": "12/06/2026 14:30", "width": 0.5, "align": "right"}
+						]
+					},
+					{"type": "separator"},
+					{
+						"type": "table",
+						"columns": [
+							{"header": "CANT",     "width": 0.10, "align": "left"},
+							{"header": "PRODUCTO", "width": 0.65, "align": "left"},
+							{"header": "TOTAL",    "width": 0.25, "align": "right"}
+						],
+						"rows": [
+							{"cells": [{"text": "2"}, {"text": "LOMO SALTADO"},   {"text": "S/ 42.00"}]},
+							{"cells": [{"text": "1"}, {"text": "COCA COLA ZERO"}, {"text": "S/ 5.00"}]}
+						]
+					},
+					{"type": "separator"},
+					{
+						"type": "table",
+						"columns": null,
+						"rows": [
+							{"cells": [{"text": "Subtotal:"},  {"text": "S/ 47.00"}]},
+							{"cells": [{"text": "IGV (18%):"}, {"text": "S/ 8.46"}]},
+							{
+								"bold": true,
+								"cells": [{"text": "TOTAL:"}, {"text": "S/ 55.46", "size": "double"}]
+							}
+						]
+					},
+					{"type": "qr", "value": "https://app.usqay.com/c/abc123", "align": "center"}
+				]
+			}`,
+		},
+		{
+			name: "ticket_80_with_padding",
+			payload: `{
+				"options": {"cut": true, "drawer": true},
+				"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0, "padding": 1.5},
+				"body": [
+					{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
+					{"type": "separator", "character": "="},
+					{
+						"type": "columns",
+						"columns": [
+							{"text": "Mesa: 5",          "width": 0.5, "align": "left"},
+							{"text": "12/06/2026 14:30", "width": 0.5, "align": "right"}
+						]
+					},
+					{"type": "separator"},
+					{
+						"type": "table",
+						"columns": [
+							{"header": "CANT",     "width": 0.10, "align": "left"},
+							{"header": "PRODUCTO", "width": 0.65, "align": "left"},
+							{"header": "TOTAL",    "width": 0.25, "align": "right"}
+						],
+						"rows": [
+							{"cells": [{"text": "2"}, {"text": "LOMO SALTADO"},   {"text": "S/ 42.00"}]},
+							{"cells": [{"text": "1"}, {"text": "COCA COLA ZERO"}, {"text": "S/ 5.00"}]}
+						]
+					}
+				]
+			}`,
+		},
+		{
+			name: "ticket_58_no_padding",
+			payload: `{
+				"options": {"cut": true, "drawer": false},
+				"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0, "padding": 0.0},
+				"body": [
+					{"type": "text", "value": "** COMANDA **", "align": "center", "bold": true},
+					{
+						"type": "table",
+						"columns": [
+							{"header": "CANT",     "width": 0.15, "align": "left"},
+							{"header": "PRODUCTO", "width": 0.85, "align": "left"}
+						],
+						"rows": [
+							{"cells": [{"text": "2"}, {"text": "ARROZ CHAUFA"}]},
+							{"merge": true, "cells": [{"text": "↳ Bien tostado, sin cebollita"}]},
+							{"cells": [{"text": "1"}, {"text": "LOMO SALTADO"}]}
+						]
+					}
+				]
+			}`,
+		},
+		{
+			name: "ticket_58_with_padding",
+			payload: `{
+				"options": {"cut": true, "drawer": false},
+				"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0, "padding": 0.5},
+				"body": [
+					{"type": "text", "value": "** COMANDA **", "align": "center", "bold": true},
+					{
+						"type": "table",
+						"columns": [
+							{"header": "CANT",     "width": 0.15, "align": "left"},
+							{"header": "PRODUCTO", "width": 0.85, "align": "left"}
+						],
+						"rows": [
+							{"cells": [{"text": "2"}, {"text": "ARROZ CHAUFA"}]},
+							{"merge": true, "cells": [{"text": "↳ Bien tostado, sin cebollita"}]},
+							{"cells": [{"text": "1"}, {"text": "LOMO SALTADO"}]}
+						]
+					}
+				]
+			}`,
+		},
+		{
+			name: "ticket_70_custom",
+			payload: `{
+				"options": {"cut": false, "drawer": false},
+				"margins": {"ancho_dimension": 70.0, "altura_dimension": 0.0, "padding": 0.0},
+				"body": [
+					{"type": "text", "value": "TICKET CUSTOM 70MM", "align": "center"},
+					{"type": "barcode", "symbology": "CODE128", "value": "B001-00000042", "align": "center", "height": 80, "hri": "below"}
+				]
+			}`,
+		},
+	}
+
+	updateGolden := os.Getenv("UPDATE_GOLDEN") == "true"
+	goldensDir := filepath.Join("testdata", "goldens")
+
+	if updateGolden {
+		if err := os.MkdirAll(goldensDir, 0755); err != nil {
+			t.Fatalf("error creando goldensDir: %v", err)
+		}
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotBytes, err := render("", tc.payload)
+			if err != nil {
+				t.Fatalf("render falló: %v", err)
+			}
+
+			goldenPath := filepath.Join(goldensDir, tc.name+".prn")
+
+			if updateGolden {
+				if err := os.WriteFile(goldenPath, gotBytes, 0644); err != nil {
+					t.Fatalf("error guardando golden file %s: %v", goldenPath, err)
+				}
+				t.Logf("golden file actualizado: %s", goldenPath)
+				return
+			}
+
+			wantBytes, err := os.ReadFile(goldenPath)
+			if err != nil {
+				t.Fatalf("error leyendo golden file %s (¿necesitas correr con UPDATE_GOLDEN=true?): %v", goldenPath, err)
+			}
+
+			if !bytes.Equal(gotBytes, wantBytes) {
+				t.Errorf("diferencia de bytes detectada respecto a golden file %s\ngot %d bytes, want %d bytes", goldenPath, len(gotBytes), len(wantBytes))
+			}
+		})
 	}
 }

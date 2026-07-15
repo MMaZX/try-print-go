@@ -106,9 +106,10 @@ func main() {
 	conn := ws.NewConnection(cfg, repo, registry)
 
 	// --- Worker con callback de notificación al servidor ---
+	prnDir := filepath.Join(resolveExeDir(), "captured_prns")
 	worker := queue.NewWorker(repo, registry, func(jobID string, estado queue.Estado, errMsg string) {
 		conn.Notify(jobID, estado, errMsg)
-	})
+	}, cfg.CapturePRN, prnDir)
 
 	go conn.Run(ctx)
 	go worker.Run(ctx)

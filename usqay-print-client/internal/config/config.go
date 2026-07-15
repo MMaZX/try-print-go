@@ -9,9 +9,10 @@ import (
 
 // Config holds all runtime configuration loaded from config.json.
 type Config struct {
-	ServerURL string `json:"server_url"`
-	Token     string `json:"token"`
-	LogLevel  string `json:"log_level"`
+	ServerURL  string `json:"server_url"`
+	Token      string `json:"token"`
+	LogLevel   string `json:"log_level"`
+	CapturePRN bool   `json:"capture_prn"`
 }
 
 // Load reads config.json from the directory containing the executable.
