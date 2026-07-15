@@ -13,7 +13,7 @@ import (
 
 func mustRenderText(t *testing.T, payload string) string {
 	t.Helper()
-	b, err := renderText("", payload)
+	b, err := renderText(nil, payload)
 	if err != nil {
 		t.Fatalf("renderText falló: %v", err)
 	}
@@ -22,7 +22,7 @@ func mustRenderText(t *testing.T, payload string) string {
 
 func mustRenderESCPOS(t *testing.T, payload string) []byte {
 	t.Helper()
-	b, err := render("", payload)
+	b, err := render(nil, payload)
 	if err != nil {
 		t.Fatalf("render falló: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestRenderStructuredEmitsPrintAreaWidth(t *testing.T) {
 // --- Error handling ---
 
 func TestRenderInvalidPayload(t *testing.T) {
-	_, err := render("", "esto no es json")
+	_, err := render(nil, "esto no es json")
 	if err == nil {
 		t.Error("esperaba error para payload inválido")
 	}
@@ -483,7 +483,7 @@ func TestRenderInvalidPayload(t *testing.T) {
 
 func TestRenderEmptyBody(t *testing.T) {
 	payload := `{"options": {"cut": false, "drawer": false}, "margins": {"ancho_dimension": 80}, "body": []}`
-	_, err := render("", payload)
+	_, err := render(nil, payload)
 	if err == nil {
 		t.Error("esperaba error para body vacío")
 	}
@@ -684,7 +684,7 @@ func TestGoldenSuite(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotBytes, err := render("", tc.payload)
+			gotBytes, err := render(nil, tc.payload)
 			if err != nil {
 				t.Fatalf("render falló: %v", err)
 			}

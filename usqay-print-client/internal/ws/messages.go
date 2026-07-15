@@ -1,22 +1,27 @@
 // Package ws handles the WebSocket connection to the print server.
 package ws
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"usqay-print-client/internal/printer"
+)
 
 // Protocol message type identifiers (must match the server constants).
 const (
-	TypeRegister     = "register"
-	TypeConfig       = "config"
-	TypePrint        = "print"
-	TypeReceived     = "received"
-	TypePrinted      = "printed"
-	TypeError        = "error"
-	TypeSync         = "sync"
-	TypePing         = "ping"
-	TypePong         = "pong"
-	TypeKick         = "kick"
-	TypeListPrinters = "list_printers"
-	TypePrinterList  = "printer_list"
+	TypeRegister             = "register"
+	TypeConfig               = "config"
+	TypePrint                = "print"
+	TypeReceived             = "received"
+	TypePrinted              = "printed"
+	TypeError                = "error"
+	TypeSync                 = "sync"
+	TypePing                 = "ping"
+	TypePong                 = "pong"
+	TypeKick                 = "kick"
+	TypeListPrinters         = "list_printers"
+	TypePrinterList          = "printer_list"
+	TypePrinterConfigUpdated = "printer_config_updated"
 )
 
 // Envelope is used to peek at the type field before full decode.
@@ -53,10 +58,11 @@ type SyncMsg struct {
 
 // PrinterSpec describes a physical printer pushed by the server in ConfigMsg.
 type PrinterSpec struct {
-	ID   string `json:"id"`             // UUID from impresoras table
-	Tipo string `json:"tipo"`           // "RED" | "USB" | "SERIE"
-	Addr string `json:"addr"`           // IP:port for RED; OS printer name for USB/SERIE
-	Mode string `json:"mode,omitempty"` // "escpos" | "text"; empty defaults to "escpos"
+	ID      string                `json:"id"`             // UUID from impresoras table
+	Tipo    string                `json:"tipo"`           // "RED" | "USB" | "SERIE"
+	Addr    string                `json:"addr"`           // IP:port for RED; OS printer name for USB/SERIE
+	Mode    string                `json:"mode,omitempty"` // "escpos" | "text"; empty defaults to "escpos"
+	Profile *printer.DeviceProfile `json:"profile,omitempty"`
 }
 
 // OsPrinterInfo carries an OS-level printer name and its auto-detected mode hint.
@@ -97,4 +103,11 @@ type PrinterListMsg struct {
 	Type      string          `json:"type"`
 	RequestID string          `json:"request_id"`
 	Printers  []OsPrinterInfo `json:"printers"`
+}
+
+// PrinterConfigUpdatedMsg is sent by the server when a printer's profile changes.
+type PrinterConfigUpdatedMsg struct {
+	Type        string                 `json:"type"`
+	ImpresoraID string                 `json:"impresora_id"`
+	Profile     *printer.DeviceProfile `json:"profile"`
 }

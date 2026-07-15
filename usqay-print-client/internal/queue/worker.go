@@ -92,13 +92,23 @@ func (w *Worker) processNext() {
 		return
 	}
 
+	// Fetch profile from local cache (SQLite)
+	var prof *printer.DeviceProfile
+	if job.ImpresoraID != "" {
+		var err error
+		prof, err = w.repo.GetProfile(job.ImpresoraID)
+		if err != nil {
+			slog.Warn("error obteniendo perfil de SQLite, se usará cascada", "src", "WORKER", "impresora_id", job.ImpresoraID, "error", err)
+		}
+	}
+
 	// Choose ESC/POS or plain-text renderer based on the printer's mode.
 	var data []byte
 	var renderErr error
 	if p.Mode() == "text" {
-		data, renderErr = renderText(job.TipoDocumento, job.Payload)
+		data, renderErr = renderText(prof, job.Payload)
 	} else {
-		data, renderErr = render(job.TipoDocumento, job.Payload)
+		data, renderErr = render(prof, job.Payload)
 	}
 	if renderErr != nil {
 		slog.Error("error renderizando payload", "src", "WORKER", "job_id", job.ID, "error", renderErr)

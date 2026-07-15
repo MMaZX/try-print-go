@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"usqay-print-client/internal/printer"
 )
 
 // ErrDuplicate is returned by Insert when the job ID already exists in the local queue.
@@ -136,4 +138,61 @@ func (r *Repository) ListByStatus(estado Estado) ([]PrintJob, error) {
 		jobs = append(jobs, job)
 	}
 	return jobs, rows.Err()
+}
+
+// SaveProfile persists or updates a printer profile in the local database.
+func (r *Repository) SaveProfile(impresoraID string, p printer.DeviceProfile) error {
+	_, err := r.db.Exec(
+		`INSERT OR REPLACE INTO printer_profiles (
+			impresora_id, width_dots, dpi, char_width_dots, supports_cut,
+			supports_drawer, supports_qr_native, supports_print_area, supports_raster
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		impresoraID, p.WidthDots, p.DPI, p.CharWidthDots,
+		boolToInt(p.SupportsCut), boolToInt(p.SupportsDrawer), boolToInt(p.SupportsQRNative),
+		boolToInt(p.SupportsPrintArea), boolToInt(p.SupportsRaster),
+	)
+	if err != nil {
+		return fmt.Errorf("guardar perfil de impresora %s: %w", impresoraID, err)
+	}
+	return nil
+}
+
+// GetProfile retrieves a printer profile by its printer ID.
+// Returns nil if no profile is cached for this ID.
+func (r *Repository) GetProfile(impresoraID string) (*printer.DeviceProfile, error) {
+	row := r.db.QueryRow(
+		`SELECT width_dots, dpi, char_width_dots, supports_cut,
+		        supports_drawer, supports_qr_native, supports_print_area, supports_raster
+		 FROM printer_profiles
+		 WHERE impresora_id = ?`,
+		impresoraID,
+	)
+	var p printer.DeviceProfile
+	var cut, drawer, qr, area, raster int
+	err := row.Scan(
+		&p.WidthDots, &p.DPI, &p.CharWidthDots, &cut, &drawer, &qr, &area, &raster,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("obtener perfil de impresora %s: %w", impresoraID, err)
+	}
+	p.SupportsCut = intToBool(cut)
+	p.SupportsDrawer = intToBool(drawer)
+	p.SupportsQRNative = intToBool(qr)
+	p.SupportsPrintArea = intToBool(area)
+	p.SupportsRaster = intToBool(raster)
+	return &p, nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func intToBool(i int) bool {
+	return i != 0
 }

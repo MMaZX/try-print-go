@@ -228,6 +228,13 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 			return
 		}
 		go c.handleListPrinters(m)
+	case TypePrinterConfigUpdated:
+		var msg PrinterConfigUpdatedMsg
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			slog.Error("error parseando printer_config_updated", "src", "SERVER", "error", err)
+			return
+		}
+		c.applyPrinterConfigUpdate(msg)
 	case TypeKick:
 		slog.Warn("esta terminal fue desplazada por una nueva conexión — reconectando", "src", "SERVER")
 	case "config_refresh":
@@ -329,6 +336,11 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 			"addr", spec.Addr,
 			"mode", p.Mode(),
 		)
+		if spec.Profile != nil {
+			if err := c.repo.SaveProfile(spec.ID, *spec.Profile); err != nil {
+				slog.Error("error guardando perfil en SQLite", "src", "CONFIG", "id", spec.ID, "error", err)
+			}
+		}
 		count++
 	}
 
@@ -343,6 +355,18 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 			"src", "CONFIG", "terminal_id", msg.TerminalID, "impresoras_activas", count)
 	} else {
 		slog.Info("configuración aplicada", "src", "SERVER", "terminal_id", msg.TerminalID, "impresoras", count)
+	}
+}
+
+// applyPrinterConfigUpdate saves a single updated profile to SQLite in hot-reload.
+func (c *Connection) applyPrinterConfigUpdate(msg PrinterConfigUpdatedMsg) {
+	if msg.Profile == nil {
+		slog.Warn("mensaje printer_config_updated sin perfil", "src", "CONFIG", "impresora_id", msg.ImpresoraID)
+		return
+	}
+	slog.Info("actualizando perfil de impresora en caliente", "src", "CONFIG", "impresora_id", msg.ImpresoraID, "width_dots", msg.Profile.WidthDots)
+	if err := c.repo.SaveProfile(msg.ImpresoraID, *msg.Profile); err != nil {
+		slog.Error("error guardando perfil en caliente en SQLite", "src", "CONFIG", "impresora_id", msg.ImpresoraID, "error", err)
 	}
 }
 

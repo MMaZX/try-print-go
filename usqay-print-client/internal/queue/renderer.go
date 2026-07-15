@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"usqay-print-client/internal/escpos"
+	"usqay-print-client/internal/printer"
 )
 
 // --- Tipos del schema de payload ---
@@ -121,7 +122,7 @@ type BarcodeBlock struct {
 // --- Puntos de entrada ---
 
 // render convierte un payload JSON a bytes ESC/POS para impresoras térmicas.
-func render(_, payload string) ([]byte, error) {
+func render(profile *printer.DeviceProfile, payload string) ([]byte, error) {
 	var p PrintPayload
 	if err := json.Unmarshal([]byte(payload), &p); err != nil {
 		return nil, fmt.Errorf("parsear payload: %w", err)
@@ -129,12 +130,12 @@ func render(_, payload string) ([]byte, error) {
 	if len(p.Body) == 0 {
 		return nil, fmt.Errorf("payload sin bloques en body")
 	}
-	return renderStructured(p)
+	return renderStructured(profile, p)
 }
 
 // renderText convierte un payload JSON a texto UTF-8 plano para impresoras no térmicas.
 // El resultado termina con \f (form feed) para expulsar la hoja.
-func renderText(_, payload string) ([]byte, error) {
+func renderText(profile *printer.DeviceProfile, payload string) ([]byte, error) {
 	var p PrintPayload
 	if err := json.Unmarshal([]byte(payload), &p); err != nil {
 		return nil, fmt.Errorf("parsear payload: %w", err)
@@ -142,18 +143,31 @@ func renderText(_, payload string) ([]byte, error) {
 	if len(p.Body) == 0 {
 		return nil, fmt.Errorf("payload sin bloques en body")
 	}
-	return renderStructuredText(p)
+	return renderStructuredText(profile, p)
 }
 
-// --- Renderer ESC/POS ---
-
-func renderStructured(payload PrintPayload) ([]byte, error) {
-	b := escpos.New()
-	anchoPapelMM := payload.Margins.DimensionPapel
-	if anchoPapelMM <= 0 {
-		anchoPapelMM = payload.Margins.AnchoDimension
+func resolveActiveProfile(prof *printer.DeviceProfile, margins PrintMargins) printer.DeviceProfile {
+	if prof != nil {
+		return *prof
 	}
-	dots, _ := paperGeometry(anchoPapelMM)
+	anchoPapelMM := margins.DimensionPapel
+	if anchoPapelMM <= 0 {
+		anchoPapelMM = margins.AnchoDimension
+	}
+	if anchoPapelMM > 0 {
+		return printer.DeriveProfileFromWidth(anchoPapelMM)
+	}
+	return printer.Default58mmProfile()
+}
+
+func renderStructured(prof *printer.DeviceProfile, payload PrintPayload) ([]byte, error) {
+	b := escpos.New()
+	activeProf := resolveActiveProfile(prof, payload.Margins)
+	dots := activeProf.WidthDots
+	charWidth := activeProf.CharWidthDots
+	if charWidth <= 0 {
+		charWidth = 12
+	}
 
 	leftMarginDots := 0
 	printWidthDots := dots
@@ -166,10 +180,12 @@ func renderStructured(payload PrintPayload) ([]byte, error) {
 			printWidthDots = 96
 		}
 	}
-	width := printWidthDots / dotsPerChar
-	b.PrintAreaWidthWithMargin(leftMarginDots, printWidthDots)
+	width := printWidthDots / charWidth
+	if activeProf.SupportsPrintArea {
+		b.PrintAreaWidthWithMargin(leftMarginDots, printWidthDots)
+	}
 
-	if payload.Options.Drawer {
+	if payload.Options.Drawer && activeProf.SupportsDrawer {
 		b.Drawer()
 	}
 
@@ -225,7 +241,11 @@ func renderStructured(payload PrintPayload) ([]byte, error) {
 				continue
 			}
 			applyAlign(b, block.Align)
-			b.QR(block.Value, positiveOrDefault(block.Size, 6))
+			if activeProf.SupportsQRNative {
+				b.QR(block.Value, positiveOrDefault(block.Size, 6))
+			} else {
+				b.Line("[QR: " + block.Value + "]")
+			}
 			b.Left()
 
 		case "barcode":
@@ -246,7 +266,7 @@ func renderStructured(payload PrintPayload) ([]byte, error) {
 		}
 	}
 
-	if payload.Options.Cut {
+	if payload.Options.Cut && activeProf.SupportsCut {
 		b.Feed(3).Cut()
 	} else {
 		b.Feed(3)
@@ -397,12 +417,13 @@ func renderColumnsESCPOS(b *escpos.Builder, block ColumnsBlock, totalWidth int) 
 
 // --- Renderer de texto plano ---
 
-func renderStructuredText(payload PrintPayload) ([]byte, error) {
-	anchoPapelMM := payload.Margins.DimensionPapel
-	if anchoPapelMM <= 0 {
-		anchoPapelMM = payload.Margins.AnchoDimension
+func renderStructuredText(prof *printer.DeviceProfile, payload PrintPayload) ([]byte, error) {
+	activeProf := resolveActiveProfile(prof, payload.Margins)
+	dots := activeProf.WidthDots
+	charWidth := activeProf.CharWidthDots
+	if charWidth <= 0 {
+		charWidth = 12
 	}
-	dots, _ := paperGeometry(anchoPapelMM)
 
 	if payload.Margins.Padding > 0 {
 		paddingDots := int(math.Round(payload.Margins.Padding * 8.0))
@@ -411,7 +432,7 @@ func renderStructuredText(payload PrintPayload) ([]byte, error) {
 			dots = 96
 		}
 	}
-	width := dots / dotsPerChar
+	width := dots / charWidth
 	var sb strings.Builder
 
 	for _, raw := range payload.Body {

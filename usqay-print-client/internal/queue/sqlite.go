@@ -21,6 +21,18 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     updated_at      DATETIME NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_print_jobs_estado ON print_jobs (estado, created_at);
+
+CREATE TABLE IF NOT EXISTS printer_profiles (
+    impresora_id          TEXT PRIMARY KEY,
+    width_dots            INTEGER NOT NULL,
+    dpi                   INTEGER NOT NULL,
+    char_width_dots       INTEGER NOT NULL,
+    supports_cut          INTEGER NOT NULL,
+    supports_drawer       INTEGER NOT NULL,
+    supports_qr_native    INTEGER NOT NULL,
+    supports_print_area   INTEGER NOT NULL,
+    supports_raster       INTEGER NOT NULL
+);
 `
 
 // Open opens (or creates) the SQLite database at dbPath and runs schema migrations.
