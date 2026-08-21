@@ -16,6 +16,11 @@ var ErrDuplicate = errors.New("trabajo duplicado")
 // ErrNoConfig is returned by LoadConfig when no cached configuration exists in the local database.
 var ErrNoConfig = errors.New("no hay configuración cacheada")
 
+// ErrCachedConfigForeignTerminal is returned by LoadCachedConfig when the terminal_id
+// stored in the cache does not match the terminal_id configured in config.json, meaning
+// the cached configuration belongs to a different terminal and must be discarded.
+var ErrCachedConfigForeignTerminal = errors.New("la configuración cacheada pertenece a otra terminal")
+
 // Estado represents the lifecycle state of a print job.
 type Estado string
 

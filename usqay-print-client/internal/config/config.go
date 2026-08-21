@@ -10,6 +10,7 @@ import (
 // Config holds all runtime configuration loaded from config.json.
 type Config struct {
 	ServerURL  string `json:"server_url"`
+	TerminalID string `json:"terminal_id"`
 	Token      string `json:"token"`
 	LogLevel   string `json:"log_level"`
 	CapturePRN bool   `json:"capture_prn"`
@@ -49,6 +50,9 @@ func Load() (*Config, error) {
 func (c *Config) Validate() error {
 	if c.ServerURL == "" {
 		return fmt.Errorf("server_url es requerido en config.json")
+	}
+	if c.TerminalID == "" {
+		return fmt.Errorf("terminal_id es requerido en config.json")
 	}
 	if c.Token == "" {
 		return fmt.Errorf("token es requerido en config.json")

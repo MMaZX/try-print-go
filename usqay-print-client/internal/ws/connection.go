@@ -323,6 +323,12 @@ func (c *Connection) LoadCachedConfig() error {
 		return fmt.Errorf("deserializar impresoras cacheadas: %w", err)
 	}
 
+	// La caché local puede pertenecer a una terminal distinta (config.json cambió de
+	// terminal, o se reusó el agent.db). Descartarla evita operar con identidad equivocada.
+	if terminalID != c.cfg.TerminalID {
+		return fmt.Errorf("%w: caché=%q config=%q", queue.ErrCachedConfigForeignTerminal, terminalID, c.cfg.TerminalID)
+	}
+
 	count := c.hydrateRegistry(printers, terminalID)
 	slog.Info("configuración offline cargada desde caché local", "terminal_id", terminalID, "impresoras", count)
 	return nil

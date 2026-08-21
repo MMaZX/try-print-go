@@ -11,7 +11,7 @@ import (
 	"usqay-print-client/internal/queue"
 )
 
-func setupTestConnection(t *testing.T) (*Connection, *queue.Repository, *printer.Registry) {
+func setupTestConnection(t *testing.T, terminalID string) (*Connection, *queue.Repository, *printer.Registry) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := queue.Open(dbPath)
@@ -25,9 +25,10 @@ func setupTestConnection(t *testing.T) (*Connection, *queue.Repository, *printer
 	repo := queue.NewRepository(db)
 	registry := printer.NewRegistry()
 	cfg := &config.Config{
-		ServerURL: "ws://localhost:8080/ws",
-		Token:     "test-token",
-		LogLevel:  "debug",
+		ServerURL:  "ws://localhost:8080/ws",
+		TerminalID: terminalID,
+		Token:      "test-token",
+		LogLevel:   "debug",
 	}
 	conn := NewConnection(cfg, repo, registry)
 	return conn, repo, registry
@@ -35,7 +36,7 @@ func setupTestConnection(t *testing.T) (*Connection, *queue.Repository, *printer
 
 func TestConnection_LoadCachedConfig(t *testing.T) {
 	t.Run("DB vacía retorna ErrNoConfig sin panic", func(t *testing.T) {
-		conn, _, reg := setupTestConnection(t)
+		conn, _, reg := setupTestConnection(t, "caja-01")
 
 		err := conn.LoadCachedConfig()
 		if err == nil {
@@ -50,7 +51,7 @@ func TestConnection_LoadCachedConfig(t *testing.T) {
 	})
 
 	t.Run("Config cacheada válida hidrata registry y terminalID", func(t *testing.T) {
-		conn, repo, reg := setupTestConnection(t)
+		conn, repo, reg := setupTestConnection(t, "caja-principal")
 
 		printers := []PrinterSpec{
 			{
@@ -105,7 +106,7 @@ func TestConnection_LoadCachedConfig(t *testing.T) {
 	})
 
 	t.Run("JSON corrupto en agent_config retorna error envuelto", func(t *testing.T) {
-		conn, repo, _ := setupTestConnection(t)
+		conn, repo, _ := setupTestConnection(t, "caja-01")
 
 		if err := repo.SaveConfig("caja-01", []byte("invalid-json")); err != nil {
 			t.Fatalf("SaveConfig falló: %v", err)
@@ -119,10 +120,27 @@ func TestConnection_LoadCachedConfig(t *testing.T) {
 			t.Error("error no debería ser ErrNoConfig con JSON corrupto")
 		}
 	})
+
+	t.Run("Caché de otra terminal es descartada (ErrCachedConfigForeignTerminal)", func(t *testing.T) {
+		conn, repo, _ := setupTestConnection(t, "caja-principal")
+
+		printersJSON := []byte(`[{"id":"p1","tipo":"RED","addr":"192.168.1.50:9100","mode":"escpos"}]`)
+		if err := repo.SaveConfig("otra-terminal", printersJSON); err != nil {
+			t.Fatalf("SaveConfig falló: %v", err)
+		}
+
+		err := conn.LoadCachedConfig()
+		if err == nil {
+			t.Fatal("se esperaba error por terminal distinta, got nil")
+		}
+		if !errors.Is(err, queue.ErrCachedConfigForeignTerminal) {
+			t.Errorf("esperaba errors.Is(err, queue.ErrCachedConfigForeignTerminal), got %v", err)
+		}
+	})
 }
 
 func TestConnection_ApplyConfig_PersistsToSQLite(t *testing.T) {
-	conn, repo, reg := setupTestConnection(t)
+	conn, repo, reg := setupTestConnection(t, "caja-bar")
 
 	msg := ConfigMsg{
 		Type:       TypeConfig,

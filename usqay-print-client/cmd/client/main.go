@@ -108,7 +108,9 @@ func main() {
 
 	// --- Hidratación offline de configuración ---
 	if err := conn.LoadCachedConfig(); err != nil {
-		if errors.Is(err, queue.ErrNoConfig) {
+		if errors.Is(err, queue.ErrCachedConfigForeignTerminal) {
+			slog.Error("configuración cacheada pertenece a otra terminal, descartada — el agente no podrá resolver impresoras hasta reconectar con el servidor")
+		} else if errors.Is(err, queue.ErrNoConfig) {
 			slog.Error("no hay configuración cacheada disponible — el agente no podrá resolver impresoras hasta reconectar con el servidor")
 		} else {
 			slog.Error("error cargando configuración cacheada desde SQLite", "error", err)
