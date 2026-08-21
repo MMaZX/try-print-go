@@ -307,23 +307,34 @@ func (c *Connection) buildSync() (SyncMsg, error) {
 	return SyncMsg{Type: TypeSync, PrintedJobs: ids}, nil
 }
 
-// applyConfig populates the printer registry from the ConfigMsg sent by the server.
-// Called each time a TypeConfig message is received (connection and config_refresh).
-// When the cycle was triggered by a config_refresh message the change is logged with
-// a distinctive [CONFIG] banner so it is unmistakable in the log output.
-func (c *Connection) applyConfig(msg ConfigMsg) {
-	isRefresh := c.pendingRefresh.Swap(false)
-
-	c.terminalID = msg.TerminalID
-	c.registry.Clear()
-
-	if isRefresh {
-		slog.Warn("▶ CONFIGURACIÓN ACTUALIZADA POR EL SERVIDOR ◀",
-			"src", "CONFIG", "terminal_id", msg.TerminalID)
+// LoadCachedConfig loads the last persisted printer configuration from SQLite
+// and populates the registry for offline operation.
+func (c *Connection) LoadCachedConfig() error {
+	terminalID, printersJSON, err := c.repo.LoadConfig()
+	if err != nil {
+		if errors.Is(err, queue.ErrNoConfig) {
+			return err
+		}
+		return fmt.Errorf("cargar configuración cacheada: %w", err)
 	}
 
+	var printers []PrinterSpec
+	if err := json.Unmarshal(printersJSON, &printers); err != nil {
+		return fmt.Errorf("deserializar impresoras cacheadas: %w", err)
+	}
+
+	count := c.hydrateRegistry(printers, terminalID)
+	slog.Info("configuración offline cargada desde caché local", "terminal_id", terminalID, "impresoras", count)
+	return nil
+}
+
+// hydrateRegistry configures terminal ID, resets the registry, and populates it with live Printer instances.
+func (c *Connection) hydrateRegistry(printers []PrinterSpec, terminalID string) int {
+	c.terminalID = terminalID
+	c.registry.Clear()
+
 	count := 0
-	for _, spec := range msg.Printers {
+	for _, spec := range printers {
 		p := buildPrinterFromSpec(spec)
 		if p == nil {
 			slog.Warn("tipo de impresora desconocido, ignorado", "src", "SERVER", "id", spec.ID, "tipo", spec.Tipo)
@@ -337,18 +348,46 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 			"addr", spec.Addr,
 			"mode", p.Mode(),
 		)
+		count++
+	}
+	return count
+}
+
+// applyConfig populates the printer registry from the ConfigMsg sent by the server.
+// Called each time a TypeConfig message is received (connection and config_refresh).
+// When the cycle was triggered by a config_refresh message the change is logged with
+// a distinctive [CONFIG] banner so it is unmistakable in the log output.
+func (c *Connection) applyConfig(msg ConfigMsg) {
+	isRefresh := c.pendingRefresh.Swap(false)
+
+	if isRefresh {
+		slog.Warn("▶ CONFIGURACIÓN ACTUALIZADA POR EL SERVIDOR ◀",
+			"src", "CONFIG", "terminal_id", msg.TerminalID)
+	}
+
+	count := c.hydrateRegistry(msg.Printers, msg.TerminalID)
+
+	for _, spec := range msg.Printers {
 		if spec.Profile != nil {
 			if err := c.repo.SaveProfile(spec.ID, *spec.Profile); err != nil {
 				slog.Error("error guardando perfil en SQLite", "src", "CONFIG", "id", spec.ID, "error", err)
 			}
 		}
-		count++
 	}
 
 	if count == 0 {
 		slog.Warn("configuración recibida sin impresoras — trabajos en cola serán retenidos hasta recibir config válida",
 			"src", "SERVER", "terminal_id", msg.TerminalID)
 		return
+	}
+
+	printersJSON, err := json.Marshal(msg.Printers)
+	if err != nil {
+		slog.Error("error serializando impresoras para caché", "src", "CONFIG", "error", err)
+	} else {
+		if err := c.repo.SaveConfig(msg.TerminalID, printersJSON); err != nil {
+			slog.Error("error guardando configuración cacheada en SQLite", "src", "CONFIG", "error", err)
+		}
 	}
 
 	if isRefresh {

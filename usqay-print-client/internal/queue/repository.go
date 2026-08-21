@@ -13,6 +13,9 @@ import (
 // ErrDuplicate is returned by Insert when the job ID already exists in the local queue.
 var ErrDuplicate = errors.New("trabajo duplicado")
 
+// ErrNoConfig is returned by LoadConfig when no cached configuration exists in the local database.
+var ErrNoConfig = errors.New("no hay configuración cacheada")
+
 // Estado represents the lifecycle state of a print job.
 type Estado string
 
@@ -184,6 +187,35 @@ func (r *Repository) GetProfile(impresoraID string) (*printer.DeviceProfile, err
 	p.SupportsPrintArea = intToBool(area)
 	p.SupportsRaster = intToBool(raster)
 	return &p, nil
+}
+
+// SaveConfig persists or updates the cached printer configuration in the local database.
+func (r *Repository) SaveConfig(terminalID string, printersJSON []byte) error {
+	_, err := r.db.Exec(
+		`INSERT OR REPLACE INTO agent_config (id, terminal_id, printers_json, updated_at)
+		 VALUES (1, ?, ?, ?)`,
+		terminalID, string(printersJSON), time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("guardar configuración cacheada: %w", err)
+	}
+	return nil
+}
+
+// LoadConfig retrieves the cached printer configuration from the local database.
+// Returns ErrNoConfig if no configuration has been cached yet.
+func (r *Repository) LoadConfig() (terminalID string, printersJSON []byte, err error) {
+	row := r.db.QueryRow(`SELECT terminal_id, printers_json FROM agent_config WHERE id = 1`)
+	var tID string
+	var pJSON string
+	err = row.Scan(&tID, &pJSON)
+	if err == sql.ErrNoRows {
+		return "", nil, fmt.Errorf("%w", ErrNoConfig)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("cargar configuración cacheada: %w", err)
+	}
+	return tID, []byte(pJSON), nil
 }
 
 func boolToInt(b bool) int {

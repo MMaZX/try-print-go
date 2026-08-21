@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -104,6 +105,15 @@ func main() {
 
 	// --- Conexión WebSocket ---
 	conn := ws.NewConnection(cfg, repo, registry)
+
+	// --- Hidratación offline de configuración ---
+	if err := conn.LoadCachedConfig(); err != nil {
+		if errors.Is(err, queue.ErrNoConfig) {
+			slog.Error("no hay configuración cacheada disponible — el agente no podrá resolver impresoras hasta reconectar con el servidor")
+		} else {
+			slog.Error("error cargando configuración cacheada desde SQLite", "error", err)
+		}
+	}
 
 	// --- Worker con callback de notificación al servidor ---
 	prnDir := filepath.Join(resolveExeDir(), "captured_prns")

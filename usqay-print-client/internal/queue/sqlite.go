@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS printer_profiles (
     supports_print_area   INTEGER NOT NULL,
     supports_raster       INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS agent_config (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    terminal_id   TEXT NOT NULL,
+    printers_json TEXT NOT NULL,
+    updated_at    DATETIME NOT NULL
+);
 `
 
 // Open opens (or creates) the SQLite database at dbPath and runs schema migrations.
