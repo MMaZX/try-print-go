@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -407,6 +408,9 @@ func buildPrinterFromSpec(spec PrinterSpec) printer.Printer {
 	case "USB", "SERIE":
 		if spec.Addr == "" {
 			return nil
+		}
+		if strings.HasPrefix(spec.Addr, "/dev/") {
+			return printer.NewDirectDevicePrinter(spec.Addr, escpos)
 		}
 		return printer.NewSystemPrinter(spec.Addr, escpos)
 	default:

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -102,16 +103,19 @@ func (w *Worker) processNext() {
 		}
 	}
 
-	// Choose ESC/POS or plain-text renderer based on the printer's mode.
+	// Choose Image/ESC/POS or plain-text renderer based on the printer's mode.
 	var data []byte
 	var renderErr error
+	renderStart := time.Now()
 	if p.Mode() == "text" {
 		data, renderErr = renderText(prof, job.Payload)
 	} else {
-		data, renderErr = render(prof, job.Payload)
+		data, renderErr = RenderImage(prof, job.Payload)
 	}
+	renderSecs := time.Since(renderStart).Seconds()
+
 	if renderErr != nil {
-		slog.Error("error renderizando payload", "src", "WORKER", "job_id", job.ID, "error", renderErr)
+		slog.Error("error renderizando payload", "src", "WORKER", "job_id", job.ID, "error", renderErr, "tiempo_render_sec", fmt.Sprintf("%.3fs", renderSecs))
 		w.finalize(job.ID, EstadoError, renderErr.Error())
 		return
 	}
@@ -129,17 +133,32 @@ func (w *Worker) processNext() {
 		}
 	}
 
-	start := time.Now()
+	printStart := time.Now()
 	printErr := p.Print(data)
-	duration := time.Since(start)
+	printSecs := time.Since(printStart).Seconds()
+	totalSecs := renderSecs + printSecs
 
 	if printErr != nil {
-		slog.Error("fallo de impresión", "src", "WORKER", "job_id", job.ID, "error", printErr, "duracion", duration)
+		slog.Error("fallo de impresión",
+			"src", "WORKER",
+			"job_id", job.ID,
+			"error", printErr,
+			"tiempo_render_sec", fmt.Sprintf("%.3fs", renderSecs),
+			"tiempo_print_sec", fmt.Sprintf("%.3fs", printSecs),
+			"tiempo_total_sec", fmt.Sprintf("%.3fs", totalSecs),
+		)
 		w.finalize(job.ID, EstadoError, printErr.Error())
 		return
 	}
 
-	slog.Info("impresión exitosa", "src", "WORKER", "job_id", job.ID, "duracion", duration)
+	slog.Info("impresión exitosa",
+		"src", "WORKER",
+		"job_id", job.ID,
+		"tamanio_bytes", len(data),
+		"tiempo_render_sec", fmt.Sprintf("%.3fs", renderSecs),
+		"tiempo_print_sec", fmt.Sprintf("%.3fs", printSecs),
+		"tiempo_total_sec", fmt.Sprintf("%.3fs", totalSecs),
+	)
 	w.finalize(job.ID, EstadoPrinted, "")
 }
 

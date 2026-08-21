@@ -8,6 +8,29 @@ import (
 	winprinter "github.com/alexbrainman/printer"
 )
 
+// DirectDevicePrinter writes directly on Windows or falls back to SystemPrinter.
+type DirectDevicePrinter struct {
+	path   string
+	escpos bool
+}
+
+// NewDirectDevicePrinter creates a direct device printer.
+func NewDirectDevicePrinter(path string, escpos bool) *DirectDevicePrinter {
+	return &DirectDevicePrinter{path: path, escpos: escpos}
+}
+
+func (p *DirectDevicePrinter) Mode() string {
+	if p.escpos {
+		return "escpos"
+	}
+	return "text"
+}
+
+func (p *DirectDevicePrinter) Print(data []byte) error {
+	sp := NewSystemPrinter(p.path, p.escpos)
+	return sp.Print(data)
+}
+
 // SystemPrinter sends bytes through the Windows Print Spooler (winspool.drv).
 // escpos=true uses datatype "RAW" (ESC/POS bytes bypass driver processing).
 // escpos=false uses datatype "TEXT" so the driver renders plain text correctly.

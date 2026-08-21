@@ -92,6 +92,20 @@ No usar `.env`. Toda la configuración se lee desde `config.json` ubicado junto 
 
 El cliente carga `config.json` al arrancar. Si no existe, termina con un error claro indicando que debe crearse. No usar valores por defecto silenciosos para campos críticos como `token` o `server_url`.
 
+### 7. Pruebas de impresión física: SIEMPRE en Windows
+
+Se comprobó (2026-08-18) que escribir ESC/POS crudo a `/dev/usb/lp0` en Linux corrompe la impresión en
+impresoras térmicas clon (artefactos, corte que no llega, impresión incompleta), incluso con pacing
+agresivo. El driver Windows del fabricante (spooler `winspool.drv`) no tiene ese problema.
+
+**Regla:** toda prueba que implique imprimir físicamente (layout, raster, corte, cajón, velocidad real) se
+hace en la VM Windows por SSH, nunca en Linux. Compilar, `go vet`, `go test ./...` sí se hacen en Linux
+normalmente — solo la impresión física migra a Windows.
+
+Flujo y credenciales: ver [`docs/entorno-pruebas-windows.md`](docs/entorno-pruebas-windows.md). Las
+credenciales de conexión viven en `usqay-print-client/windows-test.yaml` (gitignored, nunca en
+documentación ni commits) — copiar desde `usqay-print-client/windows-test.example.yaml`.
+
 ---
 
 ## Regla de Colaboración

@@ -8,7 +8,50 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// DirectDevicePrinter writes directly to a raw device node (e.g. /dev/usb/lp0, /dev/lp0, /dev/ttyUSB0).
+type DirectDevicePrinter struct {
+	path   string
+	escpos bool
+}
+
+// NewDirectDevicePrinter creates a direct device printer.
+func NewDirectDevicePrinter(path string, escpos bool) *DirectDevicePrinter {
+	return &DirectDevicePrinter{path: path, escpos: escpos}
+}
+
+func (p *DirectDevicePrinter) Mode() string {
+	if p.escpos {
+		return "escpos"
+	}
+	return "text"
+}
+
+func (p *DirectDevicePrinter) Print(data []byte) error {
+	f, err := os.OpenFile(p.path, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("abrir dispositivo %q: %w", p.path, err)
+	}
+	defer f.Close()
+
+	// Escribir en bloques de 4KB con pacing para prevenir desbordamiento de buffer en impresoras térmicas
+	const chunkSize = 4096
+	for offset := 0; offset < len(data); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		if _, err := f.Write(data[offset:end]); err != nil {
+			return fmt.Errorf("escribir en dispositivo %q: %w", p.path, err)
+		}
+		if end < len(data) {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	return nil
+}
 
 // SystemPrinter sends bytes to a CUPS printer via the lp command.
 // escpos=true adds -o raw to bypass CUPS filter chain (thermal printers).

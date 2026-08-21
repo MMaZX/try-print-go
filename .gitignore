@@ -41,3 +41,6 @@ agent.db
 logs/
 *.db
 *.log
+
+# Credenciales reales del entorno de pruebas Windows (ver *.example.yaml)
+usqay-print-client/windows-test.yaml

@@ -1,0 +1,19 @@
+# Plantilla de configuración del entorno de pruebas Windows (VM QEMU/KVM).
+#
+# Copia este archivo a `windows-test.yaml` (mismo directorio) y completa tus
+# valores reales. `windows-test.yaml` está en .gitignore y NUNCA debe
+# commitearse — es el único lugar donde viven host/usuario/impresora reales.
+#
+# Ver docs/entorno-pruebas-windows.md para el flujo completo de uso.
+
+windows_test_vm:
+  host: "192.168.122.44"
+  user: "qemu"
+  # Ruta a la llave privada SSH. Vacío = usa el default de ssh-agent/~/.ssh.
+  ssh_key_path: ""
+  # Shell remota (informativo, no se invoca directamente; ssh usa pwsh por defecto en la VM).
+  shell: "pwsh"
+  # Nombre de la impresora ya instalada en la VM (Get-Printer), NO un device path.
+  printer_name: "POS-80C"
+  # Directorio remoto donde se copian los binarios cross-compilados.
+  remote_dir: "C:/Users/qemu"
