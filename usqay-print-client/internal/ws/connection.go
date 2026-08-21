@@ -330,7 +330,12 @@ func (c *Connection) LoadCachedConfig() error {
 	}
 
 	count := c.hydrateRegistry(printers, terminalID)
-	slog.Info("configuración offline cargada desde caché local", "terminal_id", terminalID, "impresoras", count)
+	if count == 0 {
+		slog.Warn("configuración offline cargada desde caché local pero sin impresoras — el agente no podrá resolver trabajos hasta reconectar con el servidor",
+			"terminal_id", terminalID, "impresoras", count)
+	} else {
+		slog.Info("configuración offline cargada desde caché local", "terminal_id", terminalID, "impresoras", count)
+	}
 	return nil
 }
 
@@ -374,10 +379,17 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 	count := c.hydrateRegistry(msg.Printers, msg.TerminalID)
 
 	for _, spec := range msg.Printers {
-		if spec.Profile != nil {
-			if err := c.repo.SaveProfile(spec.ID, *spec.Profile); err != nil {
-				slog.Error("error guardando perfil en SQLite", "src", "CONFIG", "id", spec.ID, "error", err)
-			}
+		if spec.Profile == nil {
+			continue
+		}
+		// No persistir el perfil de una impresora cuyo tipo es desconocido:
+		// buildPrinterFromSpec devolvió nil y la impresora no se registró.
+		if buildPrinterFromSpec(spec) == nil {
+			slog.Warn("perfil ignorado para impresora de tipo desconocido", "src", "CONFIG", "id", spec.ID, "tipo", spec.Tipo)
+			continue
+		}
+		if err := c.repo.SaveProfile(spec.ID, *spec.Profile); err != nil {
+			slog.Error("error guardando perfil en SQLite", "src", "CONFIG", "id", spec.ID, "error", err)
 		}
 	}
 
