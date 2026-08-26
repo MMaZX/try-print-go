@@ -1,0 +1,610 @@
+<title>Laboratorio Offline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #eef0ea;
+    --surface: #ffffff;
+    --surface-2: #e3e6da;
+    --text: #1b1f1a;
+    --text-dim: #5b5f53;
+    --border: #c7cbba;
+    --accent: #c94a1c;
+    --accent-soft: #f4ded0;
+    --net: #1c766e;
+    --net-soft: #dcece9;
+    --ok: #2f7a4d;
+    --ok-soft: #dcefe0;
+    --warn: #9c6c17;
+    --warn-soft: #f3e6cd;
+    --err: #b13f36;
+    --err-soft: #f4dcd8;
+    --shadow: 0 1px 2px rgba(20, 20, 10, 0.06), 0 8px 24px rgba(20, 20, 10, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171a;
+      --surface: #1b1f23;
+      --surface-2: #23282d;
+      --text: #e9e7dd;
+      --text-dim: #9a9d92;
+      --border: #34393e;
+      --accent: #ff8a4d;
+      --accent-soft: #3a2717;
+      --net: #55d3ca;
+      --net-soft: #10312e;
+      --ok: #5db584;
+      --ok-soft: #163225;
+      --warn: #e3b448;
+      --warn-soft: #332a13;
+      --err: #e77c72;
+      --err-soft: #351c19;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #14171a;
+    --surface: #1b1f23;
+    --surface-2: #23282d;
+    --text: #e9e7dd;
+    --text-dim: #9a9d92;
+    --border: #34393e;
+    --accent: #ff8a4d;
+    --accent-soft: #3a2717;
+    --net: #55d3ca;
+    --net-soft: #10312e;
+    --ok: #5db584;
+    --ok-soft: #163225;
+    --warn: #e3b448;
+    --warn-soft: #332a13;
+    --err: #e77c72;
+    --err-soft: #351c19;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+  }
+
+  .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace; }
+
+  /* --- hero --- */
+  .hero { display: flex; flex-direction: column; gap: 14px; }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: clamp(28px, 4.4vw, 40px);
+    line-height: 1.12;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .thesis {
+    max-width: 62ch;
+    color: var(--text-dim);
+    font-size: 16px;
+  }
+  .thesis strong { color: var(--text); font-weight: 600; }
+
+  .pillrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .pill {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+  }
+  .pill.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+  .pill.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+  .pill.accent { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+
+  /* --- section scaffolding --- */
+  section { display: flex; flex-direction: column; gap: 18px; }
+  .section-head { display: flex; flex-direction: column; gap: 6px; }
+  .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+  }
+  h2 {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 21px;
+    font-weight: 700;
+    margin: 0;
+    text-wrap: balance;
+  }
+  p { margin: 0; color: var(--text-dim); max-width: 68ch; }
+  p.lead { color: var(--text); font-size: 15.5px; }
+
+  /* --- figures / diagrams --- */
+  figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .diagram-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  .diagram-card svg { display: block; width: 100%; height: auto; min-width: 640px; }
+  figcaption { font-size: 13.5px; color: var(--text-dim); max-width: 68ch; }
+  figcaption b { color: var(--text); font-weight: 600; }
+
+  /* --- status table --- */
+  .status-table {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 16px;
+  }
+  .status-row:last-child { border-bottom: none; }
+  .status-id { font-family: "JetBrains Mono", monospace; font-size: 12.5px; color: var(--text-dim); white-space: nowrap; flex: 0 0 auto; }
+  .status-name { font-size: 14.5px; flex: 1 1 auto; }
+  .status-badge {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+    justify-self: end;
+  }
+  .status-badge.done { color: var(--ok); background: var(--ok-soft); }
+  .status-badge.review { color: var(--warn); background: var(--warn-soft); }
+
+  /* --- terminal transcripts --- */
+  .phase {
+    display: grid;
+    grid-template-columns: 88px 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+  .phase-marker { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-top: 2px; }
+  .phase-dot {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 700;
+    background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
+  }
+  .phase-dot.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .phase-time { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--text-dim); }
+  .phase-body { display: flex; flex-direction: column; gap: 8px; }
+  .phase-title { font-weight: 600; font-size: 14.5px; }
+  .phase-note { font-size: 13.5px; color: var(--text-dim); }
+  pre.term {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    line-height: 1.65;
+    overflow-x: auto;
+    color: var(--text-dim);
+    box-shadow: var(--shadow);
+  }
+  pre.term .cli { color: var(--net); }
+  pre.term .srv { color: var(--accent); }
+  pre.term .wrk { color: var(--text); }
+  pre.term .warn { color: var(--warn); }
+
+  .callout {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--warn-soft); border-radius: 8px; padding: 12px 14px;
+    font-size: 13.5px; color: var(--text);
+  }
+  .callout b { font-weight: 600; }
+
+  /* --- command blocks --- */
+  .cmdgrid { display: flex; flex-direction: column; gap: 14px; }
+  .cmd {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .cmd-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px;
+    background: var(--surface-2);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .cmd pre {
+    margin: 0; padding: 12px 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12.5px;
+    overflow-x: auto;
+    color: var(--text);
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 22px;
+    font-size: 13px;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  footer code { font-family: "JetBrains Mono", monospace; font-size: 12px; }
+
+  @media (max-width: 620px) {
+    .phase { grid-template-columns: 56px 1fr; }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="hero">
+    <div class="eyebrow">USQAY Print — corrida capturada, no simulada</div>
+    <h1>Todo esto corrió en 127.0.0.1, sin tocar internet</h1>
+    <p class="thesis">
+      Para levantar el punto 5 (resiliencia offline) no hace falta el servidor real de producción.
+      Abajo está <strong>la ejecución real</strong> que acabo de correr: servidor, cliente, un mock de
+      Laravel y una impresora falsa, los cuatro en localhost — con los timestamps y bytes tal como
+      salieron.
+    </p>
+    <div class="pillrow">
+      <span class="pill ok">5.1 config cacheada — done</span>
+      <span class="pill ok">5.2 reintentos — done</span>
+      <span class="pill warn">5.3 test e2e — review</span>
+      <span class="pill accent">0 llamadas a internet</span>
+    </div>
+  </div>
+
+  <section>
+    <div class="section-head">
+      <span class="num">01 — la arquitectura</span>
+      <h2>Lo único que cambia son dos URLs</h2>
+      <p>El binario del cliente es exactamente el mismo en ambos casos. Lo que cambia es a dónde
+      apuntan <code class="mono">server_url</code> y <code class="mono">laravel_base_url</code>, y qué
+      responde del otro lado.</p>
+    </div>
+
+    <figure>
+      <div class="diagram-card">
+        <svg viewBox="0 0 900 460" role="img" aria-label="Comparación entre el entorno de producción, que atraviesa internet hasta app.usqay.com y Laravel real, y el entorno local, donde cliente, servidor, mock de Laravel e impresora falsa corren todos en 127.0.0.1.">
+          <defs>
+            <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+            </marker>
+            <marker id="arrowhead-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" />
+            </marker>
+          </defs>
+
+          <text x="205" y="20" text-anchor="middle" class="mono" font-size="12" letter-spacing="0.08em" fill="currentColor" opacity="0.6">PRODUCCIÓN</text>
+          <text x="695" y="20" text-anchor="middle" class="mono" font-size="12" letter-spacing="0.08em" fill="var(--accent)" font-weight="700">LOCAL — este laboratorio</text>
+
+          <!-- left column: production -->
+          <g fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.55">
+            <rect x="90" y="40" width="230" height="56" rx="7"></rect>
+            <rect x="90" y="150" width="230" height="56" rx="7"></rect>
+            <rect x="90" y="260" width="230" height="56" rx="7"></rect>
+          </g>
+          <g class="mono" font-size="12.5" text-anchor="middle" fill="currentColor">
+            <text x="205" y="64">usqay-print-client</text>
+            <text x="205" y="174">app.usqay.com</text>
+            <text x="205" y="284">Laravel producción</text>
+          </g>
+          <g class="mono" font-size="10.5" text-anchor="middle" fill="currentColor" opacity="0.55">
+            <text x="205" y="80">binario real</text>
+            <text x="205" y="190">wss:// — requiere internet</text>
+            <text x="205" y="300">valida token real</text>
+          </g>
+          <g stroke="currentColor" stroke-width="1.2" opacity="0.55" marker-end="url(#arrowhead)">
+            <line x1="205" y1="96" x2="205" y2="148"></line>
+            <line x1="205" y1="206" x2="205" y2="258"></line>
+          </g>
+
+          <!-- right column: local -->
+          <g fill="none" stroke="var(--accent)" stroke-width="1.4">
+            <rect x="580" y="40" width="230" height="56" rx="7"></rect>
+            <rect x="580" y="150" width="230" height="56" rx="7"></rect>
+            <rect x="580" y="260" width="230" height="56" rx="7"></rect>
+            <rect x="580" y="370" width="230" height="56" rx="7"></rect>
+          </g>
+          <g class="mono" font-size="12.5" text-anchor="middle" fill="currentColor">
+            <text x="695" y="64">usqay-print-client</text>
+            <text x="695" y="174">usqay-print-server</text>
+            <text x="695" y="284">mock_laravel.py</text>
+            <text x="695" y="394">impresora fake (nc)</text>
+          </g>
+          <g class="mono" font-size="10.5" text-anchor="middle" fill="var(--accent)">
+            <text x="695" y="80">mismo binario</text>
+            <text x="695" y="190">ws://127.0.0.1:8080</text>
+            <text x="695" y="300">127.0.0.1:8000</text>
+            <text x="695" y="410">127.0.0.1:9100 · tcp</text>
+          </g>
+          <g stroke="var(--accent)" stroke-width="1.4" marker-end="url(#arrowhead-accent)">
+            <line x1="695" y1="96" x2="695" y2="148"></line>
+            <line x1="695" y1="206" x2="695" y2="258"></line>
+          </g>
+
+          <!-- bypass path: client prints directly to the fake printer -->
+          <path d="M 810 68 C 872 150 872 320 810 398" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arrowhead-accent)"></path>
+          <text x="884" y="233" class="mono" font-size="10.5" fill="var(--accent)" transform="rotate(90 884 233)">imprime ESC/POS directo</text>
+        </svg>
+      </div>
+      <figcaption>
+        El cliente <b>nunca imprime a través del servidor</b>: al conectarse recibe la dirección de la
+        impresora (<code class="mono">PrinterSpec.addr</code>) y le escribe los bytes ESC/POS
+        directamente por TCP — eso es la línea punteada. El servidor solo entrega esa dirección y
+        reenvía trabajos.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="num">02 — estado del épico 5</span>
+      <h2>¿Falta algo del punto 5?</h2>
+      <p>Según <code class="mono">sprint-status.yaml</code>. La 5.3 está implementada y en verde — <em>review</em>
+      significa que falta el visto bueno de revisión, no código pendiente.</p>
+    </div>
+    <div class="status-table">
+      <div class="status-row">
+        <span class="status-id">5.1</span>
+        <span class="status-name">Configuración cacheada para arranque offline</span>
+        <span class="status-badge done">done</span>
+      </div>
+      <div class="status-row">
+        <span class="status-id">5.2</span>
+        <span class="status-name">Reintentos controlados en fallos de impresión</span>
+        <span class="status-badge done">done</span>
+      </div>
+      <div class="status-row">
+        <span class="status-id">5.3</span>
+        <span class="status-name">Test e2e del escenario caída/reconexión</span>
+        <span class="status-badge review">review</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="num">03 — la corrida</span>
+      <h2>Cuatro fases, con los logs reales</h2>
+      <p>Corrí el servidor, el mock de Laravel, una impresora falsa por TCP y el cliente, todo en este
+      mismo entorno. Estos son los timestamps y bytes tal como salieron — nada reescrito.</p>
+    </div>
+
+    <figure>
+      <div class="diagram-card">
+        <svg viewBox="0 0 900 600" role="img" aria-label="Secuencia con tres carriles — Cliente, Servidor local y Mock Laravel con impresora fake — mostrando el handshake, la impresión, la caída simulada del servidor y la reconexión con sincronización.">
+          <defs>
+            <marker id="seq-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <text x="150" y="30" text-anchor="middle" class="mono" font-size="12" font-weight="700" fill="currentColor">CLIENTE</text>
+          <text x="450" y="30" text-anchor="middle" class="mono" font-size="12" font-weight="700" fill="currentColor">SERVIDOR LOCAL</text>
+          <text x="750" y="30" text-anchor="middle" class="mono" font-size="11.5" font-weight="700" fill="currentColor">MOCK LARAVEL + IMPRESORA</text>
+
+          <g stroke="currentColor" stroke-width="1" opacity="0.25">
+            <line x1="150" y1="45" x2="150" y2="565"></line>
+            <line x1="450" y1="45" x2="450" y2="565"></line>
+            <line x1="750" y1="45" x2="750" y2="565"></line>
+          </g>
+
+          <!-- phase bands -->
+          <rect x="20" y="50" width="860" height="135" rx="8" fill="var(--surface-2)" opacity="0.5"></rect>
+          <rect x="20" y="345" width="860" height="90" rx="8" fill="var(--err-soft)" opacity="0.7"></rect>
+          <rect x="20" y="450" width="860" height="110" rx="8" fill="var(--ok-soft)" opacity="0.55"></rect>
+
+          <text x="34" y="68" class="mono" font-size="11" fill="currentColor" opacity="0.6">① 02:00:24 — handshake</text>
+          <text x="34" y="215" class="mono" font-size="11" fill="currentColor" opacity="0.6">② 02:00:35–36 — impresión</text>
+          <text x="34" y="363" class="mono" font-size="11" fill="var(--err)">③ 02:00:43 — caída simulada</text>
+          <text x="34" y="468" class="mono" font-size="11" fill="var(--ok)">④ 02:00:58 — reconexión + sync</text>
+
+          <g stroke="currentColor" stroke-width="1.1" marker-end="url(#seq-arrow)" fill="none">
+            <line x1="150" y1="90" x2="450" y2="90"></line>
+            <line x1="450" y1="115" x2="750" y2="115"></line>
+            <line x1="750" y1="140" x2="450" y2="140"></line>
+            <line x1="450" y1="165" x2="150" y2="165"></line>
+          </g>
+          <g class="mono" font-size="10.5" fill="currentColor" text-anchor="middle">
+            <text x="300" y="84">register (token)</text>
+            <text x="600" y="109">valida token</text>
+            <text x="600" y="134">1 impresora: :9100</text>
+            <text x="300" y="159">config aplicada</text>
+          </g>
+
+          <!-- phase 2 -->
+          <rect x="390" y="196" width="140" height="24" rx="12" fill="none" stroke="currentColor" opacity="0.4"></rect>
+          <text x="460" y="212" text-anchor="middle" class="mono" font-size="9.5" fill="currentColor" opacity="0.7">curl POST /api/v1/jobs</text>
+          <line x1="460" y1="220" x2="450" y2="235" stroke="currentColor" opacity="0.4" marker-end="url(#seq-arrow)"></line>
+
+          <g stroke="var(--accent)" stroke-width="1.2" marker-end="url(#seq-arrow)" fill="none">
+            <line x1="450" y1="260" x2="150" y2="260"></line>
+            <line x1="150" y1="290" x2="750" y2="290"></line>
+          </g>
+          <g class="mono" font-size="10.5" text-anchor="middle">
+            <text x="300" y="254" fill="var(--accent)">print job-local-1</text>
+            <text x="450" y="284" fill="var(--accent)">ESC/POS · 3410 bytes</text>
+          </g>
+          <text x="150" y="318" class="mono" font-size="10.5" fill="var(--ok)">SQLite: PENDING → PRINTED</text>
+          <text x="150" y="332" class="mono" font-size="9.5" fill="currentColor" opacity="0.55">(sin confirmación del servidor)</text>
+
+          <!-- phase 3 -->
+          <circle cx="450" cy="390" r="10" fill="none" stroke="var(--err)" stroke-width="1.4"></circle>
+          <path d="M445,385 L455,395 M455,385 L445,395" stroke="var(--err)" stroke-width="1.4"></path>
+          <text x="475" y="394" class="mono" font-size="10.5" fill="var(--err)">servidor caído (kill)</text>
+          <path d="M130,390 a20,16 0 1 1 40,0" fill="none" stroke="var(--err)" stroke-width="1.2" marker-end="url(#seq-arrow)"></path>
+          <text x="150" y="418" text-anchor="middle" class="mono" font-size="10" fill="var(--err)">reintentos 1s → 2s → 4s → 8s</text>
+
+          <!-- phase 4 -->
+          <g stroke="var(--ok)" stroke-width="1.2" marker-end="url(#seq-arrow)" fill="none">
+            <line x1="150" y1="480" x2="450" y2="480"></line>
+            <line x1="450" y1="505" x2="150" y2="505"></line>
+          </g>
+          <g class="mono" font-size="10.5" text-anchor="middle">
+            <text x="300" y="474" fill="var(--ok)">register + sync (1 impreso)</text>
+            <text x="300" y="524" fill="var(--ok)">config aplicada</text>
+          </g>
+          <text x="450" y="545" text-anchor="middle" class="mono" font-size="10.5" fill="var(--ok)">GET /status → pending_jobs: 0</text>
+        </svg>
+      </div>
+      <figcaption>
+        Entre las fases ③ y ④ el job ya estaba <b>impreso en SQLite local</b> — la reconexión solo
+        confirma al servidor algo que el cliente ya sabía. Esa es la regla de "Autoridad de Impresión
+        Local" del proyecto, comprobada en vivo.
+      </figcaption>
+    </figure>
+
+    <div style="display:flex; flex-direction:column; gap:20px; margin-top:8px;">
+      <div class="phase">
+        <div class="phase-marker">
+          <div class="phase-dot accent">①</div>
+          <span class="phase-time">02:00:24</span>
+        </div>
+        <div class="phase-body">
+          <div class="phase-title">Arranque y handshake</div>
+          <pre class="term"><span class="cli">[CLIENTE]</span> conectando al servidor  url=ws://127.0.0.1:8080/ws/agent
+<span class="cli">[CLIENTE]</span> sync enviado  trabajos_impresos_locales=0
+<span class="cli">[CLIENTE]</span> registrado con el servidor
+<span class="srv">[SERVER] </span> impresora registrada  id=impresora-local tipo=RED addr=127.0.0.1:9100 mode=escpos
+<span class="srv">[SERVER] </span> configuración aplicada  terminal_id=caja-local impresoras=1</pre>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-marker">
+          <div class="phase-dot accent">②</div>
+          <span class="phase-time">02:00:35</span>
+        </div>
+        <div class="phase-body">
+          <div class="phase-title">Job disparado por curl, impreso en la impresora fake</div>
+          <pre class="term"><span class="srv">[SERVER] </span> trabajo de impresión recibido  job_id=job-local-1 tipo=comanda
+<span class="wrk">[WORKER] </span> procesando trabajo  job_id=job-local-1 impresora_id=impresora-local
+<span class="wrk">[WORKER] </span> impresión exitosa  job_id=job-local-1 tamanio_bytes=3410 tiempo_total_sec=0.003s</pre>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-marker">
+          <div class="phase-dot" style="background:var(--err-soft); color:var(--err);">③</div>
+          <span class="phase-time">02:00:43</span>
+        </div>
+        <div class="phase-body">
+          <div class="phase-title">Servidor caído — el cliente no se entera de que ya imprimió</div>
+          <pre class="term"><span class="warn">[CLIENTE] WARN</span> WebSocket desconectado, reintentando  espera=1s
+<span class="cli">[CLIENTE]</span> conectando al servidor
+<span class="warn">[CLIENTE] WARN</span> connection refused  espera=2s
+<span class="warn">[CLIENTE] WARN</span> connection refused  espera=4s
+<span class="warn">[CLIENTE] WARN</span> connection refused  espera=8s</pre>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-marker">
+          <div class="phase-dot" style="background:var(--ok-soft); color:var(--ok);">④</div>
+          <span class="phase-time">02:00:58</span>
+        </div>
+        <div class="phase-body">
+          <div class="phase-title">Servidor vuelve, cliente reconecta y sincroniza</div>
+          <pre class="term"><span class="cli">[CLIENTE]</span> sync enviado  trabajos_impresos_locales=1
+<span class="cli">[CLIENTE]</span> registrado con el servidor
+<span class="srv">[SERVER] </span> sync procesado  terminal_id=caja-local confirmados=1
+<span class="srv">[SERVER] </span> sync recibido  terminal_id=caja-local trabajos_impresos=1</pre>
+          <p class="phase-note">Confirmado también por API: <code class="mono">GET /api/v1/agents/caja-local/status</code> → <code class="mono">{"online":true,"pending_jobs":0}</code></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <span>⚠</span>
+      <span><b>Detalle honesto del mock:</b> el <code class="mono">mock_laravel.py</code> de este
+      laboratorio solo implementa <code class="mono">POST</code>. Cuando el servidor intenta avisar el
+      estado por <code class="mono">PUT</code>, el mock responde 501 — no afecta el flujo de impresión
+      ni el sync, es una limitación cosmética del mock, no del servidor real.</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <span class="num">04 — reproducirlo</span>
+      <h2>Cómo lo levanté</h2>
+      <p>Versión condensada. El paso a paso completo con cada archivo de configuración está en
+      <code class="mono">docs/entorno-local-sin-servidor-real.md</code>.</p>
+    </div>
+    <div class="cmdgrid">
+      <div class="cmd">
+        <div class="cmd-head"><span>mock de Laravel + impresora fake</span><span>2 procesos</span></div>
+        <pre>python3 mock_laravel.py &amp;          # 127.0.0.1:8000 → resuelve 1 impresora
+nc -l -k 127.0.0.1 9100 &gt; /dev/null &amp;  # traga bytes ESC/POS, nunca falla</pre>
+      </div>
+      <div class="cmd">
+        <div class="cmd-head"><span>servidor local</span><span>usqay-print-server</span></div>
+        <pre>go build -o server ./cmd/server
+./server   # config.json: port 8080, laravel_base_url http://127.0.0.1:8000</pre>
+      </div>
+      <div class="cmd">
+        <div class="cmd-head"><span>cliente local</span><span>usqay-print-client</span></div>
+        <pre>go build -o client ./cmd/client
+./client   # config.json: server_url ws://127.0.0.1:8080/ws/agent</pre>
+      </div>
+      <div class="cmd">
+        <div class="cmd-head"><span>disparar un trabajo</span><span>curl</span></div>
+        <pre>curl -X POST http://127.0.0.1:8080/api/v1/jobs \
+  -H "X-Internal-Token: local-test-token" \
+  -d '{"job_id":"job-1","terminal_id":"caja-local", ...}'</pre>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Documentación completa: <code>docs/entorno-local-sin-servidor-real.md</code></span>
+    <span>Regla del proyecto sin cambios: impresión física real solo se valida en la VM Windows — ver <code>docs/entorno-pruebas-windows.md</code>.</span>
+  </footer>
+
+</div>
