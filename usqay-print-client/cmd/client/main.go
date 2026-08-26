@@ -121,7 +121,7 @@ func main() {
 	prnDir := filepath.Join(resolveExeDir(), "captured_prns")
 	worker := queue.NewWorker(repo, registry, func(jobID string, estado queue.Estado, errMsg string) {
 		conn.Notify(jobID, estado, errMsg)
-	}, cfg.CapturePRN, prnDir)
+	}, cfg.CapturePRN, prnDir, cfg.MaxRetries)
 
 	go conn.Run(ctx)
 	go worker.Run(ctx)

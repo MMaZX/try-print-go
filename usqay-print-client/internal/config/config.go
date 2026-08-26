@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 )
 
+// DefaultMaxRetries is the default number of print attempts before marking a job as ERROR.
+const DefaultMaxRetries = 3
+
 // Config holds all runtime configuration loaded from config.json.
 type Config struct {
 	ServerURL  string `json:"server_url"`
@@ -14,6 +17,7 @@ type Config struct {
 	Token      string `json:"token"`
 	LogLevel   string `json:"log_level"`
 	CapturePRN bool   `json:"capture_prn"`
+	MaxRetries int    `json:"max_retries,omitempty"`
 }
 
 // Load reads config.json from the directory containing the executable.
@@ -42,6 +46,9 @@ func Load() (*Config, error) {
 
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
+	}
+	if cfg.MaxRetries <= 0 {
+		cfg.MaxRetries = DefaultMaxRetries
 	}
 	return &cfg, nil
 }

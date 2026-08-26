@@ -369,6 +369,12 @@ func (c *Connection) hydrateRegistry(printers []PrinterSpec, terminalID string) 
 // When the cycle was triggered by a config_refresh message the change is logged with
 // a distinctive [CONFIG] banner so it is unmistakable in the log output.
 func (c *Connection) applyConfig(msg ConfigMsg) {
+	if c.cfg.TerminalID != "" && msg.TerminalID != c.cfg.TerminalID {
+		slog.Warn("configuración recibida para otra terminal, ignorada",
+			"src", "CONFIG", "terminal_id_recibido", msg.TerminalID, "terminal_id_local", c.cfg.TerminalID)
+		return
+	}
+
 	isRefresh := c.pendingRefresh.Swap(false)
 
 	if isRefresh {
@@ -382,9 +388,8 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 		if spec.Profile == nil {
 			continue
 		}
-		// No persistir el perfil de una impresora cuyo tipo es desconocido:
-		// buildPrinterFromSpec devolvió nil y la impresora no se registró.
-		if buildPrinterFromSpec(spec) == nil {
+		// No persistir el perfil de una impresora cuyo tipo es desconocido o no se registró:
+		if _, ok := c.registry.Resolve(spec.ID); !ok {
 			slog.Warn("perfil ignorado para impresora de tipo desconocido", "src", "CONFIG", "id", spec.ID, "tipo", spec.Tipo)
 			continue
 		}

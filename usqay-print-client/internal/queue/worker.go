@@ -8,10 +8,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"usqay-print-client/internal/config"
 	"usqay-print-client/internal/printer"
 )
 
-const pollInterval = 500 * time.Millisecond
+const (
+	pollInterval      = 500 * time.Millisecond
+	DefaultMaxRetries = config.DefaultMaxRetries
+)
 
 // NotifyFunc is called by the Worker when a job reaches a terminal state
 // (PRINTED or ERROR). Must be non-blocking and safe for concurrent use.
@@ -26,18 +30,39 @@ type Worker struct {
 	notify        NotifyFunc // may be nil
 	capturePRN    bool
 	capturePRNDir string
+	maxRetries    int
 }
 
 // NewWorker creates a Worker backed by repo and the printer registry.
 // notify is called after each job reaches PRINTED or ERROR; pass nil to skip.
-func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc, capturePRN bool, capturePRNDir string) *Worker {
+func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc, capturePRN bool, capturePRNDir string, maxRetries int) *Worker {
+	if maxRetries <= 0 {
+		maxRetries = DefaultMaxRetries
+	}
 	return &Worker{
 		repo:          repo,
 		registry:      registry,
 		notify:        notify,
 		capturePRN:    capturePRN,
 		capturePRNDir: capturePRNDir,
+		maxRetries:    maxRetries,
 	}
+}
+
+// backoffDuration calculates exponential delay based on attempt count (2s, 4s, 8s... max 30s).
+func backoffDuration(intento int) time.Duration {
+	if intento <= 0 {
+		return 2 * time.Second
+	}
+	if intento >= 5 {
+		return 30 * time.Second
+	}
+	base := 2 * time.Second
+	delay := base * (1 << (intento - 1))
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	return delay
 }
 
 // Run blocks, polling for PENDING jobs every 500ms, until ctx is done.
@@ -58,18 +83,18 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) processNext() {
+	// Wait for the server to deliver printer configuration before querying jobs.
+	if w.registry.Len() == 0 {
+		slog.Debug("registro de impresoras vacío, esperando config del servidor", "src", "WORKER")
+		return
+	}
+
 	job, err := w.repo.NextPending()
 	if err != nil {
 		slog.Error("error consultando trabajo pendiente", "src", "WORKER", "error", err)
 		return
 	}
 	if job == nil {
-		return
-	}
-
-	// Wait for the server to deliver printer configuration before processing.
-	if w.registry.Len() == 0 {
-		slog.Debug("registro de impresoras vacío, esperando config del servidor", "src", "WORKER", "job_id", job.ID)
 		return
 	}
 
@@ -81,7 +106,7 @@ func (w *Worker) processNext() {
 			"impresora_id", job.ImpresoraID,
 			"impresoras_configuradas", w.registry.IDs(),
 		)
-		w.finalize(job.ID, EstadoError, "impresora_id no registrada: "+job.ImpresoraID)
+		w.finalize(job.ID, EstadoError, job.Intentos, "impresora_id no registrada: "+job.ImpresoraID)
 		return
 	}
 
@@ -116,7 +141,7 @@ func (w *Worker) processNext() {
 
 	if renderErr != nil {
 		slog.Error("error renderizando payload", "src", "WORKER", "job_id", job.ID, "error", renderErr, "tiempo_render_sec", fmt.Sprintf("%.3fs", renderSecs))
-		w.finalize(job.ID, EstadoError, renderErr.Error())
+		w.finalize(job.ID, EstadoError, job.Intentos, renderErr.Error())
 		return
 	}
 
@@ -139,15 +164,41 @@ func (w *Worker) processNext() {
 	totalSecs := renderSecs + printSecs
 
 	if printErr != nil {
-		slog.Error("fallo de impresión",
+		job.Intentos++
+		if job.Intentos < w.maxRetries {
+			delay := backoffDuration(job.Intentos)
+			nextRetry := time.Now().UTC().Add(delay)
+			slog.Warn("fallo de impresión temporal, programando reintento",
+				"src", "WORKER",
+				"job_id", job.ID,
+				"intento", job.Intentos,
+				"max_intentos", w.maxRetries,
+				"reintento_en", delay,
+				"error", printErr,
+				"tiempo_render_sec", fmt.Sprintf("%.3fs", renderSecs),
+				"tiempo_print_sec", fmt.Sprintf("%.3fs", printSecs),
+				"tiempo_total_sec", fmt.Sprintf("%.3fs", totalSecs),
+			)
+			if err := w.repo.RecordRetry(job.ID, job.Intentos, nextRetry, printErr.Error()); err != nil {
+				slog.Error("error registrando reintento en SQLite, revirtiendo a PENDING", "src", "WORKER", "job_id", job.ID, "error", err)
+				if rErr := w.repo.UpdateStatus(job.ID, EstadoPending, "error en record retry: "+err.Error()); rErr != nil {
+					slog.Error("error revirtiendo job a PENDING", "src", "WORKER", "job_id", job.ID, "error", rErr)
+				}
+			}
+			return
+		}
+
+		slog.Error("fallo de impresión definitivo — superado máximo de reintentos",
 			"src", "WORKER",
 			"job_id", job.ID,
+			"intentos", job.Intentos,
+			"max_intentos", w.maxRetries,
 			"error", printErr,
 			"tiempo_render_sec", fmt.Sprintf("%.3fs", renderSecs),
 			"tiempo_print_sec", fmt.Sprintf("%.3fs", printSecs),
 			"tiempo_total_sec", fmt.Sprintf("%.3fs", totalSecs),
 		)
-		w.finalize(job.ID, EstadoError, printErr.Error())
+		w.finalize(job.ID, EstadoError, job.Intentos, fmt.Sprintf("fallo tras %d intentos: %v", job.Intentos, printErr))
 		return
 	}
 
@@ -159,13 +210,14 @@ func (w *Worker) processNext() {
 		"tiempo_print_sec", fmt.Sprintf("%.3fs", printSecs),
 		"tiempo_total_sec", fmt.Sprintf("%.3fs", totalSecs),
 	)
-	w.finalize(job.ID, EstadoPrinted, "")
+	w.finalize(job.ID, EstadoPrinted, job.Intentos, "")
 }
 
-// finalize updates the job state in SQLite and calls the notify callback.
-func (w *Worker) finalize(jobID string, estado Estado, errMsg string) {
-	if err := w.repo.UpdateStatus(jobID, estado, errMsg); err != nil {
+// finalize updates the job state and attempts in SQLite and calls the notify callback.
+func (w *Worker) finalize(jobID string, estado Estado, intentos int, errMsg string) {
+	if err := w.repo.UpdateStatusWithAttempts(jobID, estado, intentos, errMsg); err != nil {
 		slog.Error("error guardando estado final", "job_id", jobID, "estado", estado, "error", err)
+		return
 	}
 	if w.notify != nil {
 		w.notify(jobID, estado, errMsg)
