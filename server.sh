@@ -6,9 +6,11 @@ SERVER_DIR="$SCRIPT_DIR/usqay-print-server"
 BUILD_DIR="$SERVER_DIR/build"
 
 TARGET=""
+BUILD_ONLY=0
 for arg in "$@"; do
   case "$arg" in
     --target=*) TARGET="${arg#--target=}" ;;
+    --build) BUILD_ONLY=1 ;;
   esac
 done
 
@@ -37,6 +39,11 @@ echo "    OK: $BUILD_DIR/usqay-print-server"
 echo "==> Copiando config.json..."
 cp "$SERVER_DIR/config.json" "$BUILD_DIR/config.json"
 echo "    OK: $BUILD_DIR/config.json"
+
+if [[ "$BUILD_ONLY" -eq 1 ]]; then
+  echo "==> --build: binario listo, no se inicia."
+  exit 0
+fi
 
 echo "==> Iniciando usqay-print-server en primer plano..."
 cd "$BUILD_DIR"
