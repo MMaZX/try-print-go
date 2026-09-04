@@ -74,7 +74,7 @@ func TestAPIRoutes(t *testing.T) {
 	}
 
 	// Test GET /api/v1/agents/caja-01/status
-	req = httptest.NewRequest("GET", "/api/v1/agents/caja-01/status", nil)
+	req = httptest.NewRequest("GET", "/api/v1/agents/caja-01/status?business_id=empresa-01", nil)
 	req.Header.Set("X-Internal-Token", "secret123")
 	rr = httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -97,6 +97,7 @@ func TestAPIRoutes(t *testing.T) {
 	// Test POST /api/v1/jobs
 	jobReq := LaravelJobRequest{
 		JobID:         42,
+		BusinessID:    "empresa-01",
 		TerminalID:    "caja-01",
 		Tipo:          "RED",
 		DocumentoSlug: "COMANDA",
@@ -125,7 +126,7 @@ func TestAPIRoutes(t *testing.T) {
 	}
 
 	// Check pending jobs count for caja-01
-	status = hub.GetAgentStatus("caja-01")
+	status = hub.GetAgentStatus("empresa-01", "caja-01")
 	if status.PendingJobs != 1 {
 		t.Errorf("expected 1 pending job, got %v", status.PendingJobs)
 	}
@@ -147,7 +148,7 @@ func TestAPIRoutes(t *testing.T) {
 	}
 
 	// Check pending jobs count after print
-	status = hub.GetAgentStatus("caja-01")
+	status = hub.GetAgentStatus("empresa-01", "caja-01")
 	if status.PendingJobs != 0 {
 		t.Errorf("expected 0 pending jobs after printing, got %v", status.PendingJobs)
 	}

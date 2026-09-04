@@ -18,6 +18,7 @@ import (
 // LaravelJobRequest represents the JSON request from Laravel when dispatching a job.
 type LaravelJobRequest struct {
 	JobID           any             `json:"job_id"`
+	BusinessID      any             `json:"business_id"`
 	TerminalID      any             `json:"terminal_id"`
 	ImpresoraNameID string          `json:"impresora_name_id"`
 	Tipo            string          `json:"tipo"`
@@ -113,10 +114,15 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 		}
 
 		jobID := parseStringID(req.JobID)
+		businessID := parseStringID(req.BusinessID)
 		terminalID := parseStringID(req.TerminalID)
 
 		if jobID == "" {
 			http.Error(w, "job_id es requerido", http.StatusBadRequest)
+			return
+		}
+		if businessID == "" {
+			http.Error(w, "business_id es requerido", http.StatusBadRequest)
 			return
 		}
 		if terminalID == "" {
@@ -126,6 +132,7 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 
 		job, err := hub.EnqueueLaravel(
 			jobID,
+			businessID,
 			terminalID,
 			req.ImpresoraNameID,
 			req.Tipo,
@@ -138,7 +145,7 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		slog.Info("trabajo Laravel encolado", "job_id", job.ID, "terminal_id", terminalID)
+		slog.Info("trabajo Laravel encolado", "job_id", job.ID, "business_id", businessID, "terminal_id", terminalID)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -187,15 +194,21 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 	// POST /api/v1/agents/{terminal_id}/config-refresh — Notify agent to reconnect and reload config
 	mux.HandleFunc("POST /api/v1/agents/{terminal_id}/config-refresh", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		terminalID := r.PathValue("terminal_id")
+		businessID := r.URL.Query().Get("business_id")
 		if terminalID == "" {
 			http.Error(w, "terminal_id es requerido", http.StatusBadRequest)
 			return
 		}
+		if businessID == "" {
+			http.Error(w, "business_id es requerido (?business_id=)", http.StatusBadRequest)
+			return
+		}
 
-		refreshed := hub.RefreshAgentConfig(terminalID)
+		refreshed := hub.RefreshAgentConfig(businessID, terminalID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"terminal_id": terminalID,
+			"business_id": businessID,
 			"refreshed":   refreshed,
 		})
 	}))
@@ -211,24 +224,34 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 	// GET /api/v1/agents/{terminal_id}/status — Specific status of an agent
 	mux.HandleFunc("GET /api/v1/agents/{terminal_id}/status", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		terminalID := r.PathValue("terminal_id")
+		businessID := r.URL.Query().Get("business_id")
 		if terminalID == "" {
 			http.Error(w, "terminal_id es requerido", http.StatusBadRequest)
 			return
 		}
+		if businessID == "" {
+			http.Error(w, "business_id es requerido (?business_id=)", http.StatusBadRequest)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(hub.GetAgentStatus(terminalID))
+		json.NewEncoder(w).Encode(hub.GetAgentStatus(businessID, terminalID))
 	}))
 
 	// GET /api/v1/agents/{terminal_id}/printers — Request OS printer list from agent
 	mux.HandleFunc("GET /api/v1/agents/{terminal_id}/printers", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		terminalID := r.PathValue("terminal_id")
+		businessID := r.URL.Query().Get("business_id")
 		if terminalID == "" {
 			http.Error(w, "terminal_id es requerido", http.StatusBadRequest)
 			return
 		}
+		if businessID == "" {
+			http.Error(w, "business_id es requerido (?business_id=)", http.StatusBadRequest)
+			return
+		}
 
-		printers, err := hub.RequestPrinterList(terminalID)
+		printers, err := hub.RequestPrinterList(businessID, terminalID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
@@ -237,6 +260,7 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"terminal_id": terminalID,
+			"business_id": businessID,
 			"printers":    printers,
 		})
 	}))
@@ -244,8 +268,13 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 	// POST /api/v1/agents/{terminal_id}/kick — Force agent disconnection
 	mux.HandleFunc("POST /api/v1/agents/{terminal_id}/kick", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		terminalID := r.PathValue("terminal_id")
+		businessID := r.URL.Query().Get("business_id")
 		if terminalID == "" {
 			http.Error(w, "terminal_id es requerido", http.StatusBadRequest)
+			return
+		}
+		if businessID == "" {
+			http.Error(w, "business_id es requerido (?business_id=)", http.StatusBadRequest)
 			return
 		}
 
@@ -257,10 +286,11 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 			req.Reason = "desconexión forzada vía API"
 		}
 
-		kicked := hub.KickAgent(terminalID, req.Reason)
+		kicked := hub.KickAgent(businessID, terminalID, req.Reason)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"terminal_id": terminalID,
+			"business_id": businessID,
 			"kicked":      kicked,
 		})
 	}))
@@ -271,6 +301,7 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 	mux.HandleFunc("POST /api/print", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			TerminalID    string          `json:"terminal_id"`
+			BusinessID    string          `json:"business_id"`
 			TipoDocumento string          `json:"tipo_documento"`
 			Payload       json.RawMessage `json:"payload"`
 		}
@@ -281,6 +312,11 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 		if req.TerminalID == "" {
 			http.Error(w, "terminal_id es requerido", http.StatusBadRequest)
 			return
+		}
+		if req.BusinessID == "" {
+			// Endpoint de dev/testing manual, sin Laravel de por medio — un
+			// business_id fijo alcanza para no colisionar con datos reales.
+			req.BusinessID = "dev"
 		}
 		if req.TipoDocumento == "" {
 			req.TipoDocumento = "comanda"
@@ -296,7 +332,7 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 			}`)
 		}
 
-		job, err := hub.Enqueue(req.TerminalID, req.TipoDocumento, req.Payload)
+		job, err := hub.Enqueue(req.BusinessID, req.TerminalID, req.TipoDocumento, req.Payload)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

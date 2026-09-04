@@ -23,7 +23,6 @@ type Client struct {
 	connectedAt time.Time
 	lastPing    time.Time
 	send        chan any
-	pingChan    chan bool // used for active pong verification
 	ctx         context.Context
 	cancel      context.CancelFunc
 }
@@ -44,32 +43,6 @@ func (c *Client) Kick(reason string) {
 	time.AfterFunc(200*time.Millisecond, c.cancel)
 }
 
-// VerifyAlive sends a ping and waits for a pong or timeout.
-func (c *Client) VerifyAlive(timeout time.Duration) bool {
-	// Drain any leftover messages in pingChan
-	for {
-		select {
-		case <-c.pingChan:
-		default:
-			goto drained
-		}
-	}
-drained:
-
-	// Send ping
-	c.Send(map[string]string{"type": TypePing})
-
-	// Wait for pong or timeout
-	select {
-	case <-c.pingChan:
-		return true
-	case <-time.After(timeout):
-		return false
-	case <-c.ctx.Done():
-		return false
-	}
-}
-
 // ServeHTTP upgrades the HTTP connection to WebSocket and serves the client
 // for the full duration of the connection. Blocking — called from http.Handler.
 func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *http.Request) {
@@ -86,7 +59,6 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 		hub:      hub,
 		conn:     conn,
 		send:     make(chan any, 32),
-		pingChan: make(chan bool, 1),
 		ctx:      ctx,
 		cancel:   cancel,
 	}
@@ -94,10 +66,11 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 	defer conn.CloseNow()
 	defer func() {
 		if c.terminalID != "" {
-			hub.Unregister(c.terminalID, c)
+			hub.Unregister(c.businessID, c.terminalID, c)
 			hub.broadcastToMonitors(map[string]any{
 				"type":        "agent_disconnected",
 				"terminal_id": c.terminalID,
+				"business_id": c.businessID,
 			})
 		}
 	}()
@@ -105,6 +78,10 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 	// Step 1: Register handshake (10s timeout).
 	if err := c.handleRegister(tokens); err != nil {
 		slog.Warn("registro fallido", "remote", r.RemoteAddr, "error", err)
+		// Close frame explícito en vez de depender solo del defer conn.CloseNow():
+		// sin esto el cliente ve un EOF crudo y no tiene forma de saber que el
+		// registro fue rechazado en vez de una caída de red.
+		_ = c.conn.Close(websocket.StatusPolicyViolation, "registro rechazado: "+err.Error())
 		return
 	}
 
@@ -114,7 +91,7 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 
 	// Step 3: Send initial config (terminal identity + printers) and deliver any queued jobs.
 	c.Send(ConfigMsg{Type: TypeConfig, TerminalID: c.terminalID, Printers: c.printers})
-	hub.FlushPending(c.terminalID, c)
+	hub.FlushPending(c.businessID, c.terminalID, c)
 
 	// Step 4: Read pump blocks until the connection dies.
 	c.readPump()
@@ -208,17 +185,12 @@ func (c *Client) handleRegister(tokens map[string]string) error {
 	c.lastPing = time.Now().UTC()
 
 	hub := c.hub
-	success, err := hub.Register(terminalID, c)
-	if err != nil {
-		return err
-	}
-	if !success {
-		return fmt.Errorf("terminal %q ya tiene una conexión activa y saludable", terminalID)
-	}
+	hub.Register(businessID, terminalID, c)
 
 	hub.broadcastToMonitors(map[string]any{
 		"type":        "agent_connected",
 		"terminal_id": terminalID,
+		"business_id": businessID,
 		"version":     reg.Version,
 	})
 
@@ -312,16 +284,11 @@ func (c *Client) dispatch(msgType string, raw json.RawMessage) {
 	case TypeSync:
 		var m SyncMsg
 		if err := json.Unmarshal(raw, &m); err == nil {
-			c.hub.HandleSync(c.terminalID, m.PrintedJobs, c)
+			c.hub.HandleSync(c.businessID, c.terminalID, m.PrintedJobs, c)
 			slog.Info("sync recibido", slog.String("kind", "ok"), "terminal_id", c.terminalID, "trabajos_impresos", len(m.PrintedJobs))
 		}
 	case TypePing:
 		c.Send(PongMsg{Type: TypePong})
-	case TypePong:
-		select {
-		case c.pingChan <- true:
-		default:
-		}
 	case TypePrinterList:
 		var m PrinterListMsg
 		if err := json.Unmarshal(raw, &m); err == nil {

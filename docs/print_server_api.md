@@ -39,6 +39,7 @@ Todas las llamadas de este grupo requieren el header:
 ```json
 {
   "job_id": 42,
+  "business_id": "empresa-001",
   "terminal_id": "2",
   "impresora_name_id": "192.168.1.100",
   "tipo": "RED",
@@ -52,6 +53,7 @@ Todas las llamadas de este grupo requieren el header:
   "expira_en": 300
 }
 ```
+* **`business_id` es obligatorio** (400 si falta). `terminal_id` **no es único globalmente** — es autoincrement por BD tenant, así que `terminal_id="2"` puede existir simultáneamente en varias empresas. El servidor identifica cada agente por el par `(business_id, terminal_id)`; sin `business_id` no hay forma de saber a qué empresa pertenece el trabajo.
 * **Respuesta (`201 Created`):**
 ```json
 {
@@ -59,7 +61,7 @@ Todas las llamadas de este grupo requieren el header:
   "estado": "pendiente"
 }
 ```
-* **Acción:** Go encola el trabajo en memoria y hace un push inmediato vía WebSocket al agente que tenga el `terminal_id` correspondiente.
+* **Acción:** Go encola el trabajo en memoria y hace un push inmediato vía WebSocket al agente que tenga el par `(business_id, terminal_id)` correspondiente.
 
 #### 1.2. Actualizar estado de comanda (Manual/Bypass)
 * **Ruta:** `PUT /api/v1/jobs/{job_id}/status`
@@ -79,11 +81,13 @@ Todas las llamadas de este grupo requieren el header:
 ```
 
 #### 1.3. Forzar refresco de configuración en un agente
-* **Ruta:** `POST /api/v1/agents/{terminal_id}/config-refresh`
+* **Ruta:** `POST /api/v1/agents/{terminal_id}/config-refresh?business_id=empresa-001`
+* **`business_id` es obligatorio como query param** (400 si falta) — mismo motivo que en 1.1.
 * **Respuesta (`200 OK`):**
 ```json
 {
   "terminal_id": "2",
+  "business_id": "empresa-001",
   "refreshed": true
 }
 ```
@@ -108,7 +112,8 @@ Todas las llamadas de este grupo requieren el header:
 ```
 
 #### 2.2. Estado específico de un agente
-* **Ruta:** `GET /api/v1/agents/{terminal_id}/status`
+* **Ruta:** `GET /api/v1/agents/{terminal_id}/status?business_id=empresa-001`
+* **`business_id` es obligatorio como query param** (400 si falta).
 * **Respuesta (`200 OK`):**
 ```json
 {
@@ -119,7 +124,8 @@ Todas las llamadas de este grupo requieren el header:
 ```
 
 #### 2.3. Desconexión forzada (Kick)
-* **Ruta:** `POST /api/v1/agents/{terminal_id}/kick`
+* **Ruta:** `POST /api/v1/agents/{terminal_id}/kick?business_id=empresa-001`
+* **`business_id` es obligatorio como query param** (400 si falta).
 * **Body (Opcional):**
 ```json
 {
@@ -130,6 +136,7 @@ Todas las llamadas de este grupo requieren el header:
 ```json
 {
   "terminal_id": "2",
+  "business_id": "empresa-001",
   "kicked": true
 }
 ```
@@ -156,10 +163,9 @@ Al conectar, el agente envía de inmediato:
 * **Validación en Go:** 
   1. El servidor hace un GET a Laravel:
      `GET <LARAVEL_BASE_URL>/api/tenant/print-configuration/agents/validate?terminal_id=2&token=xxxxx`
-     Laravel debe retornar: `{ "valid": true, "business_id": "empresa-001" }`.
-  2. **Validación de Conexiones Duplicadas (Enfoque Híbrido):** Si ya existe un cliente activo con el mismo `terminal_id`, el servidor envía un Ping de prueba al cliente antiguo y espera una respuesta (Pong) durante **1 segundo**:
-     * **Si responde (Activo/Saludable):** La nueva conexión es rechazada automáticamente indicando que el terminal ya tiene una conexión activa y saludable.
-     * **Si no responde (Zombie/Inactivo):** La conexión antigua es desconectada y removida, y la nueva conexión es aceptada exitosamente.
+     Laravel debe retornar: `{ "valid": true, "business_id": "empresa-001", "terminal_id": "2" }`.
+  2. **Identidad del agente y conexiones duplicadas:** el servidor identifica a cada agente por el par `(business_id, terminal_id)` — **no** por `terminal_id` solo. `terminal_id` es un autoincrement por BD tenant (no global), así que dos empresas distintas pueden tener legítimamente ambas un `terminal_id="2"`; sin `business_id` en la key, esas dos conexiones colisionarían.
+     Si ya existe una conexión activa para ese mismo `(business_id, terminal_id)`, el servidor **siempre** la patea (`kick`) y registra la nueva — la conexión nueva **nunca se rechaza** (regla de negocio fija, sin excepción ni verificación previa de "salud" de la conexión anterior).
 * **Respuesta del Servidor al Agente:**
   `{ "type": "config", "terminal_id": "2" }`
 
@@ -215,6 +221,7 @@ Tras autenticar con éxito, Go le envía al navegador:
   "agents": [
     {
       "terminal_id": "2",
+      "business_id": "empresa-001",
       "online": true,
       "last_ping": "2026-06-10T02:37:15Z",
       "pending_jobs": 0
@@ -224,10 +231,10 @@ Tras autenticar con éxito, Go le envía al navegador:
 ```
 
 #### Eventos en Tiempo Real
-* **Agente conectado:** `{ "type": "agent_connected", "terminal_id": "2", "version": "1.0.3" }`
-* **Agente desconectado:** `{ "type": "agent_disconnected", "terminal_id": "2" }`
-* **Actualización de carga del Agente:** `{ "type": "agent_update", "terminal_id": "2", "pending_jobs": 3 }`
-* **Estado de comanda actualizado:** `{ "type": "job_update", "job_id": "42", "terminal_id": "2", "estado": "IMPRESO" }` // IMPRESO | ERROR | ENVIADO | PENDING
+* **Agente conectado:** `{ "type": "agent_connected", "terminal_id": "2", "business_id": "empresa-001", "version": "1.0.3" }`
+* **Agente desconectado:** `{ "type": "agent_disconnected", "terminal_id": "2", "business_id": "empresa-001" }`
+* **Actualización de carga del Agente:** `{ "type": "agent_update", "terminal_id": "2", "business_id": "empresa-001", "pending_jobs": 3 }`
+* **Estado de comanda actualizado:** `{ "type": "job_update", "job_id": "42", "terminal_id": "2", "business_id": "empresa-001", "estado": "IMPRESO" }` // IMPRESO | ERROR | ENVIADO | PENDING
 
 ---
 
@@ -241,6 +248,8 @@ Cuando un agente responde con un estado final (`printed` o `error`), el servidor
 ```json
 {
   "estado": "IMPRESO", // o "ERROR"
+  "terminal_id": "2",
+  "business_id": "empresa-001",
   "error": "Mensaje detallado del error si estado es ERROR"
 }
 ```

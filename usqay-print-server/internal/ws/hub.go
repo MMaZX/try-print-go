@@ -46,15 +46,25 @@ type AgentStatus struct {
 	PendingJobs int    `json:"pending_jobs"`
 }
 
+// agentKey uniquely identifies a terminal across all tenants. terminal_id
+// alone is NOT globally unique — cada BD tenant tiene su propia secuencia de
+// autoincrement empezando en 1, así que terminal_id=1 se repite garantizado
+// entre negocios distintos. business_id (empresa_id) sí lo es (tabla central
+// única), y alcanza como diferenciador sin necesitar sucursal_id.
+type agentKey struct {
+	businessID string
+	terminalID string
+}
+
 // Hub maintains the active terminal registry and the in-memory job queue.
 // All methods are safe for concurrent use.
 type Hub struct {
 	mu                  sync.RWMutex
 	cfg                 *config.Config
-	clients             map[string]*Client      // terminal_id → active client
-	jobs                map[string]*ServerJob   // job_id → job
-	pending             map[string][]*ServerJob // terminal_id → undelivered jobs
-	monitors            map[*MonitorClient]bool // active browser monitors
+	clients             map[agentKey]*Client      // (business_id, terminal_id) → active client
+	jobs                map[string]*ServerJob     // job_id → job (globally unique, no key change needed)
+	pending             map[agentKey][]*ServerJob // (business_id, terminal_id) → undelivered jobs
+	monitors            map[*MonitorClient]bool   // active browser monitors
 	printerListRequests map[string]chan []OsPrinterInfo // request_id → response channel
 }
 
@@ -62,69 +72,56 @@ type Hub struct {
 func NewHub(cfg *config.Config) *Hub {
 	return &Hub{
 		cfg:                 cfg,
-		clients:             make(map[string]*Client),
+		clients:             make(map[agentKey]*Client),
 		jobs:                make(map[string]*ServerJob),
-		pending:             make(map[string][]*ServerJob),
+		pending:             make(map[agentKey][]*ServerJob),
 		monitors:            make(map[*MonitorClient]bool),
 		printerListRequests: make(map[string]chan []OsPrinterInfo),
 	}
 }
 
-// Register attempts to make c the active connection for terminalID.
-// If another connection is active, it verifies if it is alive before kicking it.
-// Returns true if registration succeeded, false if rejected because the existing client is alive.
-func (h *Hub) Register(terminalID string, c *Client) (bool, error) {
+// Register makes c the active connection for (businessID, terminalID). If
+// another connection is already active for that pair, it is kicked and
+// replaced — per regla de negocio, la conexión nueva nunca se rechaza.
+func (h *Hub) Register(businessID, terminalID string, c *Client) {
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.Lock()
-	old, exists := h.clients[terminalID]
+	if old, exists := h.clients[key]; exists && old != c {
+		slog.Warn("kick: nueva conexión reemplaza a la anterior", "business_id", businessID, "terminal_id", terminalID)
+		old.Kick("nueva conexión registrada")
+	}
+	h.clients[key] = c
 	h.mu.Unlock()
 
-	if exists && old != c {
-		slog.Info("candidato duplicado detectado, verificando salud del cliente actual", "terminal_id", terminalID)
-		if old.VerifyAlive(1 * time.Second) {
-			slog.Warn("registro rechazado: el cliente actual responde y está activo", "terminal_id", terminalID)
-			return false, nil
-		}
-		// If not alive, kick the old zombie and replace it
-		slog.Warn("kick: cliente anterior inactivo/zombie detectado, desplazándolo", "terminal_id", terminalID)
-		old.Kick("nueva conexión registrada (anterior inactiva)")
-	}
-
-	h.mu.Lock()
-	// Re-check in case another client registered while we were waiting
-	if current, exists := h.clients[terminalID]; exists && current != c {
-		current.Kick("nueva conexión registrada")
-	}
-	h.clients[terminalID] = c
-	h.mu.Unlock()
-
-	slog.Info("terminal registrado exitosamente", slog.String("kind", "ok"), "terminal_id", terminalID)
-	return true, nil
+	slog.Info("terminal registrado exitosamente", slog.String("kind", "ok"), "business_id", businessID, "terminal_id", terminalID)
 }
 
 // Unregister removes c from the registry only if it is still the active connection.
 // This prevents a kicked client from removing the new one.
-func (h *Hub) Unregister(terminalID string, c *Client) {
+func (h *Hub) Unregister(businessID, terminalID string, c *Client) {
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if h.clients[terminalID] == c {
-		delete(h.clients, terminalID)
-		slog.Info("terminal desconectado", "terminal_id", terminalID)
+	if h.clients[key] == c {
+		delete(h.clients, key)
+		slog.Info("terminal desconectado", "business_id", businessID, "terminal_id", terminalID)
 	}
 }
 
 // Enqueue creates a new job for the terminal and delivers it if connected,
 // or queues it for delivery on the next connection otherwise.
-func (h *Hub) Enqueue(terminalID, tipoDocumento string, payload json.RawMessage) (*ServerJob, error) {
-	return h.EnqueueLaravel(newJobID(), terminalID, "", "", tipoDocumento, payload, 300, false)
+func (h *Hub) Enqueue(businessID, terminalID, tipoDocumento string, payload json.RawMessage) (*ServerJob, error) {
+	return h.EnqueueLaravel(newJobID(), businessID, terminalID, "", "", tipoDocumento, payload, 300, false)
 }
 
 // EnqueueLaravel creates a print job with full Laravel metadata and sends it to the agent.
 // reimpresion=true instructs the agent to replace an existing job and re-print it.
-func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documentoSlug string, payload json.RawMessage, expiraEn int, reimpresion bool) (*ServerJob, error) {
+func (h *Hub) EnqueueLaravel(jobID, businessID, terminalID, impresoraNameID, tipo, documentoSlug string, payload json.RawMessage, expiraEn int, reimpresion bool) (*ServerJob, error) {
 	job := &ServerJob{
 		ID:              jobID,
 		TerminalID:      terminalID,
+		BusinessID:      businessID,
 		ImpresoraNameID: impresoraNameID,
 		Tipo:            tipo,
 		DocumentoSlug:   documentoSlug,
@@ -134,15 +131,13 @@ func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documento
 		Estado:          "pendiente",
 		CreatedAt:       time.Now().UTC(),
 	}
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 
 	h.mu.Lock()
 	h.jobs[job.ID] = job
-	client, connected := h.clients[terminalID]
-	if connected {
-		job.BusinessID = client.businessID
-	}
+	client, connected := h.clients[key]
 	if !connected {
-		h.pending[terminalID] = append(h.pending[terminalID], job)
+		h.pending[key] = append(h.pending[key], job)
 	}
 	h.mu.Unlock()
 
@@ -160,9 +155,9 @@ func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documento
 			ExpiraEn:        job.ExpiraEn,
 			Reimpresion:     job.Reimpresion,
 		})
-		slog.Info("trabajo enviado por WebSocket", "job_id", job.ID, "terminal_id", terminalID)
+		slog.Info("trabajo enviado por WebSocket", "job_id", job.ID, "business_id", businessID, "terminal_id", terminalID)
 	} else {
-		slog.Warn("terminal desconectado — trabajo en cola", "job_id", job.ID, "terminal_id", terminalID)
+		slog.Warn("terminal desconectado — trabajo en cola", "job_id", job.ID, "business_id", businessID, "terminal_id", terminalID)
 	}
 
 	// Notify monitors
@@ -170,22 +165,25 @@ func (h *Hub) EnqueueLaravel(jobID, terminalID, impresoraNameID, tipo, documento
 		"type":        "job_update",
 		"job_id":      job.ID,
 		"terminal_id": terminalID,
+		"business_id": businessID,
 		"estado":      "PENDIENTE",
 	})
 	h.broadcastToMonitors(map[string]any{
 		"type":         "agent_update",
 		"terminal_id":  terminalID,
-		"pending_jobs": h.PendingJobsCount(terminalID),
+		"business_id":  businessID,
+		"pending_jobs": h.PendingJobsCount(businessID, terminalID),
 	})
 
 	return job, nil
 }
 
 // FlushPending delivers all queued jobs to the newly connected terminal.
-func (h *Hub) FlushPending(terminalID string, c *Client) {
+func (h *Hub) FlushPending(businessID, terminalID string, c *Client) {
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.Lock()
-	jobs := h.pending[terminalID]
-	delete(h.pending, terminalID)
+	jobs := h.pending[key]
+	delete(h.pending, key)
 	h.mu.Unlock()
 
 	for _, job := range jobs {
@@ -202,17 +200,17 @@ func (h *Hub) FlushPending(terminalID string, c *Client) {
 			ExpiraEn:        job.ExpiraEn,
 			Reimpresion:     job.Reimpresion,
 		})
-		slog.Info("trabajo pendiente entregado tras reconexión", slog.String("kind", "ok"), "job_id", job.ID, "terminal_id", terminalID)
+		slog.Info("trabajo pendiente entregado tras reconexión", slog.String("kind", "ok"), "job_id", job.ID, "business_id", businessID, "terminal_id", terminalID)
 	}
 }
 
 // HandleSync marks the given job IDs as printed and resends any jobs the
 // client missed while disconnected.
-func (h *Hub) HandleSync(terminalID string, printedIDs []string, c *Client) {
+func (h *Hub) HandleSync(businessID, terminalID string, printedIDs []string, c *Client) {
 	h.mu.Lock()
 	updatedIDs := make([]string, 0)
 	for _, id := range printedIDs {
-		if job, ok := h.jobs[id]; ok && job.TerminalID == terminalID && job.Estado != "impreso" {
+		if job, ok := h.jobs[id]; ok && job.BusinessID == businessID && job.TerminalID == terminalID && job.Estado != "impreso" {
 			job.Estado = "impreso"
 			updatedIDs = append(updatedIDs, id)
 		}
@@ -224,6 +222,7 @@ func (h *Hub) HandleSync(terminalID string, printedIDs []string, c *Client) {
 			"type":        "job_update",
 			"job_id":      id,
 			"terminal_id": terminalID,
+			"business_id": businessID,
 			"estado":      "IMPRESO",
 		})
 		h.updateLaravelJobStatus(id, "IMPRESO", "")
@@ -232,20 +231,22 @@ func (h *Hub) HandleSync(terminalID string, printedIDs []string, c *Client) {
 	h.broadcastToMonitors(map[string]any{
 		"type":         "agent_update",
 		"terminal_id":  terminalID,
-		"pending_jobs": h.PendingJobsCount(terminalID),
+		"business_id":  businessID,
+		"pending_jobs": h.PendingJobsCount(businessID, terminalID),
 	})
 
-	slog.Info("sync procesado", slog.String("kind", "ok"), "terminal_id", terminalID, "confirmados", len(printedIDs))
+	slog.Info("sync procesado", slog.String("kind", "ok"), "business_id", businessID, "terminal_id", terminalID, "confirmados", len(printedIDs))
 }
 
 // MarkReceived sets the job state to "enviado" (ACK from client).
 func (h *Hub) MarkReceived(jobID string) {
 	h.mu.Lock()
-	var terminalID string
+	var terminalID, businessID string
 	var found bool
 	if job, ok := h.jobs[jobID]; ok {
 		job.Estado = "enviado"
 		terminalID = job.TerminalID
+		businessID = job.BusinessID
 		found = true
 	}
 	h.mu.Unlock()
@@ -255,12 +256,14 @@ func (h *Hub) MarkReceived(jobID string) {
 			"type":        "job_update",
 			"job_id":      jobID,
 			"terminal_id": terminalID,
+			"business_id": businessID,
 			"estado":      "ENVIADO",
 		})
 		h.broadcastToMonitors(map[string]any{
 			"type":         "agent_update",
 			"terminal_id":  terminalID,
-			"pending_jobs": h.PendingJobsCount(terminalID),
+			"business_id":  businessID,
+			"pending_jobs": h.PendingJobsCount(businessID, terminalID),
 		})
 	}
 }
@@ -268,11 +271,12 @@ func (h *Hub) MarkReceived(jobID string) {
 // MarkPrinted sets the job state to "impreso" and calls Laravel webhook.
 func (h *Hub) MarkPrinted(jobID string) {
 	h.mu.Lock()
-	var terminalID string
+	var terminalID, businessID string
 	var found bool
 	if job, ok := h.jobs[jobID]; ok {
 		job.Estado = "impreso"
 		terminalID = job.TerminalID
+		businessID = job.BusinessID
 		found = true
 	}
 	h.mu.Unlock()
@@ -283,12 +287,14 @@ func (h *Hub) MarkPrinted(jobID string) {
 			"type":        "job_update",
 			"job_id":      jobID,
 			"terminal_id": terminalID,
+			"business_id": businessID,
 			"estado":      "IMPRESO",
 		})
 		h.broadcastToMonitors(map[string]any{
 			"type":         "agent_update",
 			"terminal_id":  terminalID,
-			"pending_jobs": h.PendingJobsCount(terminalID),
+			"business_id":  businessID,
+			"pending_jobs": h.PendingJobsCount(businessID, terminalID),
 		})
 		h.updateLaravelJobStatus(jobID, "IMPRESO", "")
 	}
@@ -297,11 +303,12 @@ func (h *Hub) MarkPrinted(jobID string) {
 // MarkError sets the job state to "error" and calls Laravel webhook.
 func (h *Hub) MarkError(jobID, msg string) {
 	h.mu.Lock()
-	var terminalID string
+	var terminalID, businessID string
 	var found bool
 	if job, ok := h.jobs[jobID]; ok {
 		job.Estado = "error"
 		terminalID = job.TerminalID
+		businessID = job.BusinessID
 		found = true
 	}
 	h.mu.Unlock()
@@ -312,12 +319,14 @@ func (h *Hub) MarkError(jobID, msg string) {
 			"type":        "job_update",
 			"job_id":      jobID,
 			"terminal_id": terminalID,
+			"business_id": businessID,
 			"estado":      "ERROR",
 		})
 		h.broadcastToMonitors(map[string]any{
 			"type":         "agent_update",
 			"terminal_id":  terminalID,
-			"pending_jobs": h.PendingJobsCount(terminalID),
+			"business_id":  businessID,
+			"pending_jobs": h.PendingJobsCount(businessID, terminalID),
 		})
 		h.updateLaravelJobStatus(jobID, "ERROR", msg)
 	}
@@ -328,8 +337,8 @@ func (h *Hub) ConnectedTerminals() []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	ids := make([]string, 0, len(h.clients))
-	for id := range h.clients {
-		ids = append(ids, id)
+	for key := range h.clients {
+		ids = append(ids, key.terminalID)
 	}
 	return ids
 }
@@ -347,17 +356,17 @@ func (h *Hub) JobSummary() []*ServerJob {
 }
 
 // PendingJobsCount returns the number of active jobs for a terminal.
-func (h *Hub) PendingJobsCount(terminalID string) int {
+func (h *Hub) PendingJobsCount(businessID, terminalID string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.countPendingJobsLocked(terminalID)
+	return h.countPendingJobsLocked(businessID, terminalID)
 }
 
 // countPendingJobsLocked counts active jobs without taking the lock.
-func (h *Hub) countPendingJobsLocked(terminalID string) int {
+func (h *Hub) countPendingJobsLocked(businessID, terminalID string) int {
 	count := 0
 	for _, job := range h.jobs {
-		if job.TerminalID == terminalID && job.Estado != "impreso" && job.Estado != "error" {
+		if job.BusinessID == businessID && job.TerminalID == terminalID && job.Estado != "impreso" && job.Estado != "error" {
 			count++
 		}
 	}
@@ -370,9 +379,9 @@ func (h *Hub) ConnectedAgentsInfo() []AgentInfo {
 	defer h.mu.RUnlock()
 
 	infos := make([]AgentInfo, 0, len(h.clients))
-	for id, client := range h.clients {
+	for key, client := range h.clients {
 		infos = append(infos, AgentInfo{
-			TerminalID:  id,
+			TerminalID:  key.terminalID,
 			BusinessID:  client.businessID,
 			ConnectedAt: client.connectedAt.Format(time.RFC3339),
 			LastPing:    client.lastPing.Format(time.RFC3339),
@@ -381,10 +390,11 @@ func (h *Hub) ConnectedAgentsInfo() []AgentInfo {
 	return infos
 }
 
-// GetAgentStatus returns the status of a specific terminal ID.
-func (h *Hub) GetAgentStatus(terminalID string) AgentStatus {
+// GetAgentStatus returns the status of a specific (business_id, terminal_id) pair.
+func (h *Hub) GetAgentStatus(businessID, terminalID string) AgentStatus {
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.RLock()
-	client, online := h.clients[terminalID]
+	client, online := h.clients[key]
 	h.mu.RUnlock()
 
 	var lastPing string
@@ -395,14 +405,15 @@ func (h *Hub) GetAgentStatus(terminalID string) AgentStatus {
 	return AgentStatus{
 		Online:      online,
 		LastPing:    lastPing,
-		PendingJobs: h.PendingJobsCount(terminalID),
+		PendingJobs: h.PendingJobsCount(businessID, terminalID),
 	}
 }
 
 // KickAgent disconnects an agent forcefully.
-func (h *Hub) KickAgent(terminalID string, reason string) bool {
+func (h *Hub) KickAgent(businessID, terminalID string, reason string) bool {
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.Lock()
-	client, found := h.clients[terminalID]
+	client, found := h.clients[key]
 	h.mu.Unlock()
 
 	if found {
@@ -413,9 +424,10 @@ func (h *Hub) KickAgent(terminalID string, reason string) bool {
 }
 
 // RefreshAgentConfig sends config_refresh message to the agent.
-func (h *Hub) RefreshAgentConfig(terminalID string) bool {
+func (h *Hub) RefreshAgentConfig(businessID, terminalID string) bool {
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.RLock()
-	client, found := h.clients[terminalID]
+	client, found := h.clients[key]
 	h.mu.RUnlock()
 
 	if found {
@@ -566,9 +578,10 @@ func (h *Hub) validateMonitorTokenWithLaravel(token string) (bool, error) {
 
 // RequestPrinterList sends a list_printers request to the connected agent and waits for the response.
 // Returns an error if the terminal is not connected or if the request times out.
-func (h *Hub) RequestPrinterList(terminalID string) ([]OsPrinterInfo, error) {
+func (h *Hub) RequestPrinterList(businessID, terminalID string) ([]OsPrinterInfo, error) {
+	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.RLock()
-	client, online := h.clients[terminalID]
+	client, online := h.clients[key]
 	h.mu.RUnlock()
 
 	if !online {

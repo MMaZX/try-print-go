@@ -129,6 +129,7 @@ func (m *MonitorClient) handleAuth() error {
 // MonitorAgentInfo holds fields returned in the snapshot
 type MonitorAgentInfo struct {
 	TerminalID  string `json:"terminal_id"`
+	BusinessID  string `json:"business_id"`
 	Online      bool   `json:"online"`
 	LastPing    string `json:"last_ping"`
 	PendingJobs int    `json:"pending_jobs"`
@@ -138,12 +139,13 @@ type MonitorAgentInfo struct {
 func (m *MonitorClient) sendSnapshot() {
 	m.hub.mu.RLock()
 	agents := make([]MonitorAgentInfo, 0, len(m.hub.clients))
-	for id, client := range m.hub.clients {
+	for key, client := range m.hub.clients {
 		agents = append(agents, MonitorAgentInfo{
-			TerminalID:  id,
+			TerminalID:  key.terminalID,
+			BusinessID:  key.businessID,
 			Online:      true,
 			LastPing:    client.lastPing.Format(time.RFC3339),
-			PendingJobs: m.hub.countPendingJobsLocked(id),
+			PendingJobs: m.hub.countPendingJobsLocked(key.businessID, key.terminalID),
 		})
 	}
 	m.hub.mu.RUnlock()
