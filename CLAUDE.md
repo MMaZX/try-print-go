@@ -90,7 +90,9 @@ No usar `.env`. Toda la configuración se lee desde `config.json` ubicado junto 
 }
 ```
 
-El cliente carga `config.json` al arrancar. Si no existe, termina con un error claro indicando que debe crearse. No usar valores por defecto silenciosos para campos críticos como `token` o `server_url`.
+El cliente carga `config.json` al arrancar. **Si no existe**, no termina con error: lanza un wizard interactivo por consola que pregunta los campos obligatorios (`server_url`, `terminal_id`, `token`), reintenta si alguno llega vacío, y arma `config.json` en el mismo directorio del ejecutable. Si `config.json` ya existe, el wizard nunca se ejecuta — se carga directo. `log_level` no se pregunta: siempre queda en `"info"` por default en la primera corrida. No usar valores por defecto silenciosos para campos críticos como `token` o `server_url` cuando sí vienen en el JSON (es decir, un `token` vacío en un `config.json` existente sigue siendo un error de `Validate()`, no se rellena solo).
+
+Implementación: `usqay-print-client/internal/config/config.go` (`runFirstTimeSetup`, `promptRequired`).
 
 ### 7. Pruebas de impresión física: SIEMPRE en Windows
 

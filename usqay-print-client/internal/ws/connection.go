@@ -267,23 +267,17 @@ func (c *Connection) handlePrintJob(msg PrintJobMsg) {
 		UpdatedAt:     now,
 	}
 
-	if msg.Reimpresion {
-		if err := c.repo.Upsert(job); err != nil {
-			slog.Error("error guardando reimpresión en SQLite", "src", "SERVER", "job_id", msg.JobID, "error", err)
+	if err := c.repo.Enqueue(job, msg.Reimpresion); err != nil {
+		if errors.Is(err, queue.ErrDuplicate) {
+			slog.Warn("trabajo duplicado ignorado — ya existe en cola local", "src", "SERVER", "job_id", msg.JobID)
+		} else {
+			slog.Error("error guardando trabajo en SQLite", "src", "SERVER", "job_id", msg.JobID, "error", err)
 			return
 		}
+	} else if msg.Reimpresion {
 		slog.Info("reimpresión encolada", "src", "SERVER", "job_id", msg.JobID, "tipo", msg.TipoDocumento)
 	} else {
-		if err := c.repo.Insert(job); err != nil {
-			if errors.Is(err, queue.ErrDuplicate) {
-				slog.Warn("trabajo duplicado ignorado — ya existe en cola local", "src", "SERVER", "job_id", msg.JobID)
-			} else {
-				slog.Error("error guardando trabajo en SQLite", "src", "SERVER", "job_id", msg.JobID, "error", err)
-				return
-			}
-		} else {
-			slog.Info("trabajo de impresión recibido", "src", "SERVER", "job_id", msg.JobID, "tipo", msg.TipoDocumento)
-		}
+		slog.Info("trabajo de impresión recibido", "src", "SERVER", "job_id", msg.JobID, "tipo", msg.TipoDocumento)
 	}
 
 	// ACK immediately — the worker will handle the actual printing asynchronously.
@@ -325,7 +319,9 @@ func (c *Connection) LoadCachedConfig() error {
 
 	// La caché local puede pertenecer a una terminal distinta (config.json cambió de
 	// terminal, o se reusó el agent.db). Descartarla evita operar con identidad equivocada.
-	if terminalID != c.cfg.TerminalID {
+	// terminal_id es opcional en config.json: si no está seteado no hay con qué comparar,
+	// así que se acepta la caché tal cual venga (igual que con TypeConfig, ver más abajo).
+	if c.cfg.TerminalID != "" && terminalID != c.cfg.TerminalID {
 		return fmt.Errorf("%w: caché=%q config=%q", queue.ErrCachedConfigForeignTerminal, terminalID, c.cfg.TerminalID)
 	}
 

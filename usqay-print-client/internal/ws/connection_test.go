@@ -137,6 +137,25 @@ func TestConnection_LoadCachedConfig(t *testing.T) {
 			t.Errorf("esperaba errors.Is(err, queue.ErrCachedConfigForeignTerminal), got %v", err)
 		}
 	})
+
+	t.Run("terminal_id vacío en config.json acepta la caché de cualquier terminal", func(t *testing.T) {
+		conn, repo, reg := setupTestConnection(t, "")
+
+		printersJSON := []byte(`[{"id":"p1","tipo":"RED","addr":"192.168.1.50:9100","mode":"escpos"}]`)
+		if err := repo.SaveConfig("caja-lo-que-sea", printersJSON); err != nil {
+			t.Fatalf("SaveConfig falló: %v", err)
+		}
+
+		if err := conn.LoadCachedConfig(); err != nil {
+			t.Fatalf("LoadCachedConfig falló con terminal_id local vacío: %v", err)
+		}
+		if conn.terminalID != "caja-lo-que-sea" {
+			t.Errorf("terminalID = %q, want %q (adoptado de la caché)", conn.terminalID, "caja-lo-que-sea")
+		}
+		if reg.Len() != 1 {
+			t.Errorf("registry len = %d, want 1", reg.Len())
+		}
+	})
 }
 
 func TestConnection_ApplyConfig_PersistsToSQLite(t *testing.T) {
