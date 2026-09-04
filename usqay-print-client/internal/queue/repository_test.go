@@ -94,6 +94,74 @@ func TestRepository_Config(t *testing.T) {
 	})
 }
 
+func TestRepository_Enqueue(t *testing.T) {
+	baseJob := func(id string) queue.PrintJob {
+		now := time.Now().UTC()
+		return queue.PrintJob{
+			ID:            id,
+			TipoDocumento: "comanda",
+			ImpresoraID:   "printer-1",
+			Payload:       `{"mesa":1}`,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+	}
+
+	t.Run("reimpresion=false inserta un job nuevo", func(t *testing.T) {
+		repo := setupTestDB(t)
+
+		if err := repo.Enqueue(baseJob("job-1"), false); err != nil {
+			t.Fatalf("Enqueue falló: %v", err)
+		}
+
+		job, err := repo.NextPending()
+		if err != nil {
+			t.Fatalf("NextPending falló: %v", err)
+		}
+		if job == nil || job.ID != "job-1" {
+			t.Fatalf("esperaba job-1 en PENDING, got %+v", job)
+		}
+	})
+
+	t.Run("reimpresion=false con job_id duplicado devuelve ErrDuplicate", func(t *testing.T) {
+		repo := setupTestDB(t)
+
+		if err := repo.Enqueue(baseJob("job-2"), false); err != nil {
+			t.Fatalf("primer Enqueue falló: %v", err)
+		}
+
+		err := repo.Enqueue(baseJob("job-2"), false)
+		if !errors.Is(err, queue.ErrDuplicate) {
+			t.Errorf("esperaba errors.Is(err, queue.ErrDuplicate), got %v", err)
+		}
+	})
+
+	t.Run("reimpresion=true reemplaza un job existente", func(t *testing.T) {
+		repo := setupTestDB(t)
+
+		if err := repo.Enqueue(baseJob("job-3"), false); err != nil {
+			t.Fatalf("Enqueue inicial falló: %v", err)
+		}
+		if err := repo.UpdateStatus("job-3", queue.EstadoPrinted, ""); err != nil {
+			t.Fatalf("UpdateStatus falló: %v", err)
+		}
+
+		replacement := baseJob("job-3")
+		replacement.Payload = `{"mesa":2}`
+		if err := repo.Enqueue(replacement, true); err != nil {
+			t.Fatalf("Enqueue con reimpresion falló: %v", err)
+		}
+
+		job, err := repo.NextPending()
+		if err != nil {
+			t.Fatalf("NextPending falló: %v", err)
+		}
+		if job == nil || job.ID != "job-3" || job.Payload != `{"mesa":2}` {
+			t.Fatalf("esperaba job-3 reemplazado y en PENDING, got %+v", job)
+		}
+	})
+}
+
 func TestRepository_Retry(t *testing.T) {
 	t.Run("RecordRetry actualiza intentos y next_retry_at", func(t *testing.T) {
 		repo := setupTestDB(t)

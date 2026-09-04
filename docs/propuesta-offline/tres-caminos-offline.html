@@ -1,0 +1,420 @@
+<title>Tres Caminos Offline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+  :root {
+    --bg: #f1f3f7;
+    --surface: #ffffff;
+    --surface-2: #e7eaf1;
+    --border: #dadfe9;
+    --text: #171b26;
+    --text-dim: #5a6274;
+    --accent: #3355d8;
+    --accent-soft: #e4eafc;
+
+    --p1: #0d8a72;   --p1-soft: #dff2ec;
+    --p2: #b3690b;   --p2-soft: #faead2;
+    --p3: #7c3aed;   --p3-soft: #ede4fc;
+
+    --ok: #1c8250;   --danger: #b3402f;
+    --shadow: 0 1px 2px rgba(15, 20, 35, 0.05), 0 8px 24px rgba(15, 20, 35, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b;
+      --surface: #191d26;
+      --surface-2: #21262f;
+      --border: #2e3441;
+      --text: #e8eaf0;
+      --text-dim: #9aa1b2;
+      --accent: #8fa6f5;
+      --accent-soft: #1e2740;
+
+      --p1: #4fc9a9;   --p1-soft: #123028;
+      --p2: #e3a24d;   --p2-soft: #362811;
+      --p3: #b697fa;   --p3-soft: #2a1f45;
+
+      --ok: #57c383;   --danger: #ec8c7a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b; --surface: #191d26; --surface-2: #21262f; --border: #2e3441;
+    --text: #e8eaf0; --text-dim: #9aa1b2; --accent: #8fa6f5; --accent-soft: #1e2740;
+    --p1: #4fc9a9; --p1-soft: #123028; --p2: #e3a24d; --p2-soft: #362811;
+    --p3: #b697fa; --p3-soft: #2a1f45; --ok: #57c383; --danger: #ec8c7a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Source Sans 3", -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  .wrap { max-width: 900px; margin: 0 auto; padding: 44px 20px 90px; display: flex; flex-direction: column; gap: 28px; }
+
+  header { display: flex; flex-direction: column; gap: 12px; }
+  .eyebrow { font-family: "Sora", sans-serif; font-weight: 700; font-size: 12.5px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-family: "Sora", sans-serif; font-weight: 800; font-size: clamp(28px, 5vw, 38px); line-height: 1.12; margin: 0; text-wrap: balance; }
+  .subtitle { font-size: 16px; color: var(--text-dim); max-width: 62ch; }
+
+  .breaks-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
+  }
+  .flow { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--text-dim); overflow-x: auto; white-space: pre; }
+  .flow b { color: var(--danger); }
+  .breaks-card p { margin: 0; font-size: 14.5px; }
+  .breaks-card code { font-family: "IBM Plex Mono", monospace; background: var(--surface-2); padding: 2px 6px; border-radius: 5px; font-size: 13px; }
+
+  /* --- tabs --- */
+  .tabbar { display: flex; gap: 6px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .tab-btn {
+    font-family: "Sora", sans-serif; font-weight: 700; font-size: 13.5px;
+    background: none; border: none; padding: 12px 16px 13px;
+    color: var(--text-dim); cursor: pointer; white-space: nowrap;
+    border-bottom: 3px solid transparent; margin-bottom: -1px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tab-btn[aria-selected="true"] { color: var(--text); }
+  .tab-btn[data-tab="resumen"][aria-selected="true"] { border-color: var(--accent); }
+  .tab-btn[data-tab="p1"][aria-selected="true"] { border-color: var(--p1); }
+  .tab-btn[data-tab="p2"][aria-selected="true"] { border-color: var(--p2); }
+  .tab-btn[data-tab="p3"][aria-selected="true"] { border-color: var(--p3); }
+  .tab-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; position: relative; top: -1px; }
+  .tab-btn[data-tab="p1"] .tab-dot { background: var(--p1); }
+  .tab-btn[data-tab="p2"] .tab-dot { background: var(--p2); }
+  .tab-btn[data-tab="p3"] .tab-dot { background: var(--p3); }
+
+  .tabpanel { display: none; flex-direction: column; gap: 22px; }
+  .tabpanel.active { display: flex; }
+
+  section { display: flex; flex-direction: column; gap: 12px; }
+  h2 { font-family: "Sora", sans-serif; font-weight: 700; font-size: 19px; margin: 0; text-wrap: balance; }
+  h3 { font-family: "Sora", sans-serif; font-weight: 700; font-size: 15.5px; margin: 0; }
+  p { margin: 0; color: var(--text-dim); max-width: 68ch; }
+  p.lead { color: var(--text); font-size: 15px; }
+
+  .id-banner { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-radius: 12px; box-shadow: var(--shadow); }
+  .id-banner .idx { font-family: "Sora", sans-serif; font-weight: 800; font-size: 20px; width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto; }
+  #panel-p1 .id-banner { background: var(--p1-soft); } #panel-p1 .idx { background: var(--p1); }
+  #panel-p2 .id-banner { background: var(--p2-soft); } #panel-p2 .idx { background: var(--p2); }
+  #panel-p3 .id-banner { background: var(--p3-soft); } #panel-p3 .idx { background: var(--p3); }
+  .id-banner strong { font-family: "Sora", sans-serif; font-size: 16px; display: block; }
+  .id-banner span { font-size: 13.5px; color: var(--text-dim); }
+
+  .diagram-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); overflow-x: auto; }
+  .diagram-card pre.mermaid { margin: 0; display: flex; justify-content: center; min-width: 560px; }
+
+  .codebox { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+  .codebox-head { padding: 8px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-dim); font-family: "IBM Plex Mono", monospace; }
+  .codebox pre { margin: 0; padding: 13px 14px; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.65; overflow-x: auto; color: var(--text); }
+
+  table.risk { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); font-size: 13.5px; }
+  table.risk th { text-align: left; background: var(--surface-2); font-family: "Sora", sans-serif; font-weight: 700; font-size: 12px; padding: 10px 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+  table.risk td { padding: 10px 12px; border-top: 1px solid var(--border); vertical-align: top; color: var(--text); }
+  .table-wrap { overflow-x: auto; }
+
+  .effort-line { font-size: 14px; padding: 12px 16px; border-radius: 10px; background: var(--surface-2); }
+
+  /* --- comparison table (resumen) --- */
+  table.compare { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); font-size: 14px; }
+  table.compare th { text-align: left; padding: 12px 14px; background: var(--surface-2); font-family: "Sora", sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim); }
+  table.compare td { padding: 12px 14px; border-top: 1px solid var(--border); color: var(--text); }
+  table.compare td.name { font-weight: 700; font-family: "Sora", sans-serif; font-size: 13.5px; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-family: "Sora", sans-serif; font-weight: 700; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; }
+  .badge.p1 { background: var(--p1-soft); color: var(--p1); } .badge.p2 { background: var(--p2-soft); color: var(--p2); } .badge.p3 { background: var(--p3-soft); color: var(--p3); }
+
+  .exists-list { display: flex; flex-direction: column; }
+  .exists-row { display: flex; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .exists-row:last-child { border-bottom: none; }
+  .exists-row .where { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--text-dim); flex: 0 0 210px; }
+  .exists-row .what { font-size: 13.5px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+
+  .reco {
+    background: var(--accent-soft); border-radius: 12px; padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .reco h3 { color: var(--accent); }
+  .reco p { color: var(--text); font-size: 14.5px; }
+
+  footer { border-top: 1px solid var(--border); padding-top: 18px; font-size: 13px; color: var(--text-dim); }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">USQAY Print · decisión de arquitectura</span>
+    <h1>Tres caminos para el modo offline real</h1>
+    <p class="subtitle">Cuando no hay internet, ¿cómo llega un trabajo de impresión desde Electron hasta la estación correcta entre N máquinas de la LAN? Tres propuestas alternativas — se elige una.</p>
+  </header>
+
+  <div class="breaks-card">
+    <div class="flow">Electron/Next (rest_web_react)  →  Laravel  →  usqay-print-server (nube)  →  WebSocket  →  usqay-print-client  →  impresora
+                                          <b>✕ sin internet, esto se corta acá</b></div>
+    <p>El frontend ya asume <code>http://localhost:9100/print</code> como agente local — pero eso solo funciona si Electron y la impresora están en la <strong>misma máquina</strong>. Con N estaciones en N máquinas, se rompe.</p>
+  </div>
+
+  <div class="tabbar" role="tablist" aria-label="Propuestas de modo offline">
+    <button class="tab-btn" data-tab="resumen" role="tab" aria-selected="true" aria-controls="panel-resumen" id="tab-resumen">Resumen</button>
+    <button class="tab-btn" data-tab="p1" role="tab" aria-selected="false" aria-controls="panel-p1" id="tab-p1"><span class="tab-dot"></span>Propuesta 1</button>
+    <button class="tab-btn" data-tab="p2" role="tab" aria-selected="false" aria-controls="panel-p2" id="tab-p2"><span class="tab-dot"></span>Propuesta 2</button>
+    <button class="tab-btn" data-tab="p3" role="tab" aria-selected="false" aria-controls="panel-p3" id="tab-p3"><span class="tab-dot"></span>Propuesta 3</button>
+  </div>
+
+  <!-- ===================== RESUMEN ===================== -->
+  <div class="tabpanel active" id="panel-resumen" role="tabpanel" aria-labelledby="tab-resumen">
+
+    <section>
+      <h2>Lo que ya existe y no hay que rehacer</h2>
+      <p>Investigar antes de proponer encontró más piezas construidas de las que parecía a primera vista.</p>
+      <div class="card exists-list">
+        <div class="exists-row"><span class="where">usqay-print-client</span><span class="what">Resiliencia offline (épica 5): config cacheada en SQLite, reintentos con backoff, impresión sin conexión activa.</span></div>
+        <div class="exists-row"><span class="where">electron/sync/sync-engine.js</span><span class="what">Outbox de pedidos/cobros/inventario ya en SQLite local, con sync contra <span class="mono">/tenant/sync/offline</span> e idempotency_key.</span></div>
+        <div class="exists-row"><span class="where">lib/print-dispatch.ts</span><span class="what">Contrato <span class="mono">PrintJob</span> ya tipado y compatible con el renderer del cliente Go — y ya asume un agente local en <span class="mono">:9100</span>.</span></div>
+        <div class="exists-row"><span class="where">usqay-print-server</span><span class="what">Protocolo Register/Config/PrintJob/Sync por WebSocket, ya validado en LAN pura esta semana.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Comparación</h2>
+      <div class="table-wrap">
+        <table class="compare">
+          <thead><tr><th>Propuesta</th><th>Idea central</th><th>Esfuerzo</th><th>Cuándo conviene</th></tr></thead>
+          <tbody>
+            <tr><td class="name"><span class="badge p1">① Agente HTTP + registro</span></td><td>Cada estación abre <span class="mono">:9100/print</span>; Electron guarda <span class="mono">terminal_id → IP</span></td><td>Bajo</td><td>Locales chicos, salir rápido</td></tr>
+            <tr><td class="name"><span class="badge p2">② Descubrimiento mDNS</span></td><td>Las estaciones se anuncian solas en la LAN, sin IPs a mano</td><td>Medio</td><td>Varias estaciones, IPs por DHCP</td></tr>
+            <tr><td class="name"><span class="badge p3">③ Hub embebido</span></td><td>Electron levanta su propio <span class="mono">usqay-print-server</span> como sidecar en la LAN</td><td>Medio-alto</td><td>Escala real, un solo protocolo</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="reco">
+      <h3>Recomendación</h3>
+      <p>Empezar por la <strong>Propuesta 1</strong> para no bloquear lo que depende de esto hoy — reutiliza el contrato que el frontend ya tiene escrito. La <strong>Propuesta 3</strong> es el destino final si el número de estaciones crece: comparten la mitad del trabajo (el agente Go necesita HTTP entrante en ambas), así que empezar por la 1 no es tiempo perdido. La <strong>Propuesta 2</strong> se suma encima de cualquiera de las otras el día que mantener IPs a mano se vuelva un problema real.</p>
+    </div>
+  </div>
+
+  <!-- ===================== PROPUESTA 1 ===================== -->
+  <div class="tabpanel" id="panel-p1" role="tabpanel" aria-labelledby="tab-p1">
+    <div class="id-banner"><span class="idx">1</span><div><strong>Agente HTTP local + registro de estaciones en LAN</strong><span>El cambio más chico posible sobre lo que ya existe en los dos repos</span></div></div>
+
+    <section>
+      <p class="lead">Cumplir literalmente el contrato que <span class="mono">rest_web_react</span> ya tiene escrito (<span class="mono">localhost:9100/print</span>), generalizado a toda la LAN: cada <span class="mono">usqay-print-client</span> abre su propio servidor HTTP, y Electron guarda a qué IP corresponde cada <span class="mono">terminal_id</span>.</p>
+    </section>
+
+    <section>
+      <h2>Flujo</h2>
+      <div class="diagram-card">
+        <pre class="mermaid">
+sequenceDiagram
+    participant E as Electron (POS, sin internet)
+    participant R as local_estaciones (SQLite)
+    participant A as usqay-print-client (cocina-01, :9100)
+    participant P as Impresora física
+
+    E->>R: ¿IP de terminal_id = "cocina-01"?
+    R-->>E: 192.168.1.42
+    E->>A: POST http://192.168.1.42:9100/print
+    A->>A: repo.Insert (misma cola SQLite del worker)
+    A-->>E: 200 OK
+    A->>P: Worker imprime ESC/POS (ciclo ya probado)
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Cambios por repositorio</h2>
+      <div class="codebox">
+        <div class="codebox-head">usqay-print-client/internal/localapi/server.go — nuevo</div>
+        <pre>mux.HandleFunc("POST /print", func(w http.ResponseWriter, r *http.Request) {
+    var job PrintJobPayload
+    json.NewDecoder(r.Body).Decode(&job)
+    repo.Insert(queue.PrintJob{ID: job.JobID, Payload: string(job.Payload), ...})
+    w.WriteHeader(http.StatusOK)
+})
+go http.ListenAndServe("0.0.0.0:9100", mux)</pre>
+      </div>
+      <div class="codebox">
+        <div class="codebox-head">rest_web_react/lib/print-dispatch.ts — una función nueva</div>
+        <pre>function resolveAgentUrl(terminalId: string): string {
+  const estacion = getEstacionLocal(terminalId) // lee local_estaciones
+  return `http://${estacion?.ip_lan ?? 'localhost'}:${estacion?.puerto ?? 9100}/print`
+}</pre>
+      </div>
+      <p>Todo lo demás — <span class="mono">postToAgent</span>, el reintento de <span class="mono">print-retry.js</span> — sigue igual, porque el contrato <span class="mono">PrintJob</span> no cambia.</p>
+    </section>
+
+    <section>
+      <h2>Riesgos</h2>
+      <div class="table-wrap">
+        <table class="risk">
+          <thead><tr><th>Riesgo</th><th>Impacto</th><th>Mitigación</th></tr></thead>
+          <tbody>
+            <tr><td>Firewall de Windows bloquea :9100 entrante</td><td>Alto</td><td>Regla de firewall en el instalador NSIS</td></tr>
+            <tr><td>IP cambia por DHCP</td><td>Medio</td><td>IP fija por MAC, o migrar a Propuesta 2</td></tr>
+            <tr><td>Sin autenticación en :9100/print</td><td>Bajo en LAN cerrada</td><td>Token compartido por header si hace falta</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="effort-line"><strong>Esfuerzo:</strong> 1 archivo nuevo en el cliente Go (~60-80 líneas), 1 tabla SQLite + 1 función en el frontend. Sin tocar <span class="mono">usqay-print-server</span> ni el protocolo WebSocket.</p>
+  </div>
+
+  <!-- ===================== PROPUESTA 2 ===================== -->
+  <div class="tabpanel" id="panel-p2" role="tabpanel" aria-labelledby="tab-p2">
+    <div class="id-banner"><span class="idx">2</span><div><strong>Descubrimiento automático (mDNS / zeroconf)</strong><span>Las estaciones se anuncian solas, nadie configura IPs a mano</span></div></div>
+
+    <section>
+      <p class="lead">Misma base que la Propuesta 1 (cada agente expone <span class="mono">:9100/print</span>), pero cada estación se anuncia sola en la red local y Electron arma el mapa <span class="mono">terminal_id → IP</span> automáticamente, en vivo — la misma tecnología que usa una impresora AirPrint o un Chromecast.</p>
+    </section>
+
+    <section>
+      <h2>Flujo</h2>
+      <div class="diagram-card">
+        <pre class="mermaid">
+sequenceDiagram
+    participant A as usqay-print-client (cocina-01)
+    participant N as Red local (multicast)
+    participant E as Electron (POS)
+
+    A->>N: Anuncio mDNS "_usqayprint._tcp" cada pocos segundos
+    E->>N: Escucha continua de anuncios
+    N-->>E: cocina-01 @ 192.168.1.42:9100
+    E->>A: POST http://192.168.1.42:9100/print
+    A-->>E: 200 OK
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Cambios por repositorio</h2>
+      <div class="codebox">
+        <div class="codebox-head">usqay-print-client — main.go, con github.com/grandcat/zeroconf</div>
+        <pre>server, _ := zeroconf.Register(
+    cfg.TerminalID, "_usqayprint._tcp", "local.", 9100,
+    []string{"terminal_id=" + cfg.TerminalID}, nil,
+)
+defer server.Shutdown()</pre>
+      </div>
+      <div class="codebox">
+        <div class="codebox-head">electron — con bonjour-service</div>
+        <pre>const bonjour = new Bonjour()
+bonjour.find({ type: 'usqayprint' }, (service) => {
+  estaciones.set(service.txt.terminal_id, { ip: service.referer.address, puerto: service.port })
+})</pre>
+      </div>
+      <p><span class="mono">local_estaciones</span> pasa de fuente de verdad a caché de la última vez vista — útil como fallback si mDNS falla en algún router.</p>
+    </section>
+
+    <section>
+      <h2>Riesgos</h2>
+      <div class="table-wrap">
+        <table class="risk">
+          <thead><tr><th>Riesgo</th><th>Impacto</th><th>Mitigación</th></tr></thead>
+          <tbody>
+            <tr><td>Routers con "AP isolation" filtran multicast entre equipos</td><td>Alto si pasa</td><td>Documentar requisito de red; mantener tabla manual como fallback</td></tr>
+            <tr><td>Firewall de Windows (mDNS + :9100)</td><td>Medio</td><td>Reglas en el instalador, igual que Propuesta 1</td></tr>
+            <tr><td>Nueva dependencia en ambos repos</td><td>Bajo-medio</td><td>Librerías maduras, protocolo estándar (RFC 6762/6763)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="effort-line"><strong>Esfuerzo:</strong> se construye encima de la Propuesta 1 (no la reemplaza) — agregar <span class="mono">zeroconf</span>/<span class="mono">bonjour-service</span> y cambiar de dónde sale el mapa de IPs.</p>
+  </div>
+
+  <!-- ===================== PROPUESTA 3 ===================== -->
+  <div class="tabpanel" id="panel-p3" role="tabpanel" aria-labelledby="tab-p3">
+    <div class="id-banner"><span class="idx">3</span><div><strong>Hub local embebido en Electron</strong><span>Un solo protocolo online/offline, el que ya está probado</span></div></div>
+
+    <section>
+      <p class="lead">En vez de un contrato HTTP que solo existe para offline, se reutiliza el WebSocket de <span class="mono">usqay-print-server</span> — ya probado en LAN pura esta semana. Electron levanta ese mismo binario como sidecar (igual que ya hace con el server Next.js), y cada estación se conecta ahí cuando no hay internet, con el mismo protocolo de siempre.</p>
+    </section>
+
+    <section>
+      <h2>Flujo</h2>
+      <div class="diagram-card">
+        <pre class="mermaid">
+sequenceDiagram
+    participant E as Electron (POS)
+    participant H as Hub local (usqay-print-server sidecar, :8080)
+    participant C as usqay-print-client (cocina-01)
+    participant P as Impresora física
+
+    E->>H: POST /api/v1/jobs (mismo endpoint que Laravel usa online)
+    H->>C: PrintJobMsg por WebSocket (mismo protocolo de la nube)
+    C->>P: Imprime ESC/POS (Autoridad de Impresión Local, épica 5)
+    C-->>H: sync (job impreso)
+    Note over C,H: Al volver el internet, C reconecta solo<br/>a wss://app.usqay.com (server_urls[0])
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Cambios por repositorio</h2>
+      <div class="codebox">
+        <div class="codebox-head">electron/main.js — nuevo sidecar, mismo patrón que startNextServer()</div>
+        <pre>printHub = spawn(hubBinPath, [], { cwd: hubConfigDir, env: process.env })
+// bind 0.0.0.0 — otras máquinas de la LAN deben poder llegar</pre>
+      </div>
+      <div class="codebox">
+        <div class="codebox-head">usqay-print-client/internal/ws/connection.go — server_urls con failover</div>
+        <pre>{
+  "server_urls": ["wss://app.usqay.com/ws", "ws://192.168.1.50:8080/ws/agent"],
+  "terminal_id": "cocina-01"
+}
+// Run() recorre la lista en orden; el backoff de la épica 5 ya existe,
+// solo cambia a qué URL apunta cada reintento.</pre>
+      </div>
+      <p>El hub resuelve impresoras en orden: Laravel (si responde) → config estática local → última config cacheada — mismo principio que la config cacheada del cliente (story 5.1), ahora también en el servidor.</p>
+    </section>
+
+    <section>
+      <h2>Riesgos</h2>
+      <div class="table-wrap">
+        <table class="risk">
+          <thead><tr><th>Riesgo</th><th>Impacto</th><th>Mitigación</th></tr></thead>
+          <tbody>
+            <tr><td>Si la máquina del hub se apaga, cae la impresión de todas las estaciones offline</td><td>Alto</td><td>Elegir como hub la máquina que menos se apaga; a futuro combinar con mDNS para elegir hub dinámicamente</td></tr>
+            <tr><td>Resolver impresoras sin Laravel es trabajo nuevo</td><td>Medio</td><td>Empezar solo con config estática, cacheo automático en 2ª iteración</td></tr>
+            <tr><td>Empaquetar un binario Go en 3 plataformas</td><td>Medio</td><td><span class="mono">asarUnpack</span>/<span class="mono">extraResources</span> ya es un patrón usado hoy para el server Next.js</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="effort-line"><strong>Esfuerzo:</strong> el más alto de los tres (~3-5 días entre los dos repos), pero un solo protocolo para siempre en vez de mantener WS + HTTP en paralelo — es la que mejor sostiene el crecimiento.</p>
+  </div>
+
+  <footer>
+    Detalle completo de cada propuesta: <code>docs/propuesta-offline/</code>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var tabs = document.querySelectorAll('.tab-btn');
+    var panels = { resumen: document.getElementById('panel-resumen'), p1: document.getElementById('panel-p1'), p2: document.getElementById('panel-p2'), p3: document.getElementById('panel-p3') };
+
+    tabs.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        tabs.forEach(function (b) { b.setAttribute('aria-selected', 'false'); });
+        Object.values(panels).forEach(function (p) { p.classList.remove('active'); });
+        btn.setAttribute('aria-selected', 'true');
+        panels[btn.dataset.tab].classList.add('active');
+      });
+    });
+  })();
+</script>

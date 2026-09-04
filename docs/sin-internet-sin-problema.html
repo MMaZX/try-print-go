@@ -1,0 +1,505 @@
+<title>Sin Internet, Sin Problema</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+  :root {
+    --bg: #f1f4f2;
+    --surface: #ffffff;
+    --border: #dbe1dc;
+    --text: #172522;
+    --text-dim: #5c6963;
+    --accent: #1f5fcf;
+    --accent-soft: #e4ecfb;
+    --ok: #1c8250;
+    --ok-soft: #e1f2e6;
+    --warn: #9c650c;
+    --warn-soft: #faecd6;
+    --danger: #ac4130;
+    --danger-soft: #fae3de;
+    --shadow: 0 1px 2px rgba(20, 30, 25, 0.05), 0 6px 20px rgba(20, 30, 25, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121715;
+      --surface: #191f1c;
+      --border: #2c3733;
+      --text: #e8ede9;
+      --text-dim: #9aa69f;
+      --accent: #7ba3f2;
+      --accent-soft: #1c2740;
+      --ok: #57c383;
+      --ok-soft: #17301f;
+      --warn: #e0ab53;
+      --warn-soft: #362a12;
+      --danger: #ec8c7a;
+      --danger-soft: #3a1f19;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 26px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121715;
+    --surface: #191f1c;
+    --border: #2c3733;
+    --text: #e8ede9;
+    --text-dim: #9aa69f;
+    --accent: #7ba3f2;
+    --accent-soft: #1c2740;
+    --ok: #57c383;
+    --ok-soft: #17301f;
+    --warn: #e0ab53;
+    --warn-soft: #362a12;
+    --danger: #ec8c7a;
+    --danger-soft: #3a1f19;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 26px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Source Sans 3", -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 34px;
+  }
+
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  header { display: flex; flex-direction: column; gap: 10px; }
+  .eyebrow {
+    font-family: "Sora", sans-serif;
+    font-weight: 700;
+    font-size: 12.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: "Sora", sans-serif;
+    font-weight: 800;
+    font-size: clamp(30px, 7vw, 42px);
+    line-height: 1.1;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .subtitle {
+    font-size: 16.5px;
+    color: var(--text-dim);
+    max-width: 46ch;
+  }
+
+  /* --- banner: the one thing everyone must remember --- */
+  .banner {
+    background: var(--ok-soft);
+    border-radius: 14px;
+    padding: 22px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    box-shadow: var(--shadow);
+  }
+  .banner .icon { flex: 0 0 auto; margin-top: 2px; }
+  .banner-title {
+    font-family: "Sora", sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--ok);
+    margin: 0 0 4px;
+  }
+  .banner p { margin: 0; color: var(--text); font-size: 15.5px; }
+
+  section { display: flex; flex-direction: column; gap: 14px; }
+  h2 {
+    font-family: "Sora", sans-serif;
+    font-weight: 700;
+    font-size: 20px;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .section-note { color: var(--text-dim); font-size: 14.5px; margin: -6px 0 0; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .checklist { display: flex; flex-direction: column; }
+  .check-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .check-item:last-child { border-bottom: none; }
+  .check-item .icon { flex: 0 0 auto; margin-top: 1px; }
+  .check-item strong { display: block; font-size: 15px; }
+  .check-item span.detail { display: block; font-size: 13.5px; color: var(--text-dim); margin-top: 2px; }
+
+  .no-list { display: flex; flex-direction: column; }
+  .no-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .no-item:last-child { border-bottom: none; }
+  .no-item .icon { flex: 0 0 auto; margin-top: 1px; }
+  .no-item strong { display: block; font-size: 15px; }
+
+  .info-card {
+    background: var(--accent-soft);
+    border-radius: 12px;
+    padding: 18px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .info-card p { margin: 0; font-size: 15px; }
+  .info-card strong { color: var(--accent); }
+
+  .steps { counter-reset: step; display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: flex;
+    gap: 14px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .step:last-child { border-bottom: none; }
+  .step-num {
+    counter-increment: step;
+    flex: 0 0 auto;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-family: "Sora", sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .step-num::before { content: counter(step); }
+  .step p { margin: 0; font-size: 15px; }
+
+  .escalate {
+    background: var(--danger-soft);
+    border-radius: 14px;
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: var(--shadow);
+  }
+  .escalate-title {
+    font-family: "Sora", sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--danger);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .escalate p { margin: 0; font-size: 15px; }
+  .escalate ul { margin: 0; padding-left: 20px; font-size: 14.5px; color: var(--text); display: flex; flex-direction: column; gap: 4px; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  svg.ico { display: block; }
+
+  /* --- usage: file list + config + commands --- */
+  .filelist { display: flex; flex-direction: column; }
+  .file-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .file-row:last-child { border-bottom: none; }
+  .file-row .name { font-family: "IBM Plex Mono", monospace; font-size: 13.5px; white-space: nowrap; flex: 0 0 auto; padding-top: 1px; }
+  .file-row .desc { font-size: 14px; color: var(--text-dim); }
+
+  .codebox {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .codebox-head {
+    padding: 9px 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--text-dim);
+  }
+  .codebox pre {
+    margin: 0;
+    padding: 13px 14px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    overflow-x: auto;
+    color: var(--text);
+  }
+  .codebox pre .field { color: var(--accent); }
+
+  .cmd-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cmd-row:last-child { border-bottom: none; }
+  .cmd-row strong { font-size: 14.5px; }
+  .cmd-row code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    background: var(--bg);
+    padding: 6px 10px;
+    border-radius: 6px;
+    width: fit-content;
+  }
+  .cmd-row span.why { font-size: 13.5px; color: var(--text-dim); }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">USQAY Print · Guía para soporte</span>
+    <h1>Sin internet, sin problema</h1>
+    <p class="subtitle">Qué hacer cuando el local se queda sin señal o el servidor no responde.</p>
+  </header>
+
+  <div class="banner">
+    <span class="icon">
+      <svg class="ico" width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+        <circle cx="13" cy="13" r="11" stroke="var(--ok)" stroke-width="2"/>
+        <path d="M8 13.5l3.2 3.2L18 9.5" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <div>
+      <p class="banner-title">El sistema no se detiene</p>
+      <p>Aunque se caiga el internet o el servidor, la impresora <strong>sigue imprimiendo los pedidos</strong>. No se pierde ningún ticket — quedan guardados en la computadora hasta que se imprimen.</p>
+    </div>
+  </div>
+
+  <section>
+    <h2>Cómo se usa el programa</h2>
+    <p class="section-note">Lo normal es no tocarlo nunca — pero conviene saber qué es cada cosa.</p>
+    <div class="card filelist">
+      <div class="file-row">
+        <span class="name">usqay-print-client.exe</span>
+        <span class="desc">El programa. Arranca solo con Windows y se queda corriendo todo el día.</span>
+      </div>
+      <div class="file-row">
+        <span class="name">config.json</span>
+        <span class="desc">Va al lado del .exe. Dice a qué local y a qué servidor pertenece esa PC.</span>
+      </div>
+      <div class="file-row">
+        <span class="name">logs/</span>
+        <span class="desc">Un archivo de texto por día (ej. <span class="mono">2026-08-26.log</span>). Ahí queda todo lo que hizo el programa.</span>
+      </div>
+      <div class="file-row">
+        <span class="name">agent.db</span>
+        <span class="desc">Guarda los pedidos pendientes o ya impresos. Nunca se borra ni se mueve.</span>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <span class="icon">
+        <svg class="ico" width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+          <circle cx="11" cy="11" r="9" stroke="var(--accent)" stroke-width="1.7"/>
+          <path d="M11 10v5.2" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="11" cy="7.3" r="1.05" fill="var(--accent)"/>
+        </svg>
+      </span>
+      <p><strong>Instalando una estación nueva:</strong> se da de alta en <a href="https://rest-web.appusqay.com/restaurant/admin/impresion/estaciones-terminal" style="color:var(--accent);">Admin → Impresión → Estaciones/Terminal</a>. Ahí se configura la información de la terminal y el sistema devuelve el <strong>token de acceso</strong> que va en <span class="mono">config.json</span>. Cada <span class="mono">terminal_id</span> es una estación de impresión distinta (una caja, una cocina) — no reutilizar el mismo en dos PCs.</p>
+    </div>
+
+    <div class="codebox">
+      <div class="codebox-head">config.json — ejemplo</div>
+      <pre>{
+  <span class="field">"server_url"</span>: "wss://app.usqay.com/ws",
+  <span class="field">"terminal_id"</span>: "caja-01",
+  <span class="field">"token"</span>: "•••• (lo da desarrollo)",
+  <span class="field">"log_level"</span>: "info"
+}</pre>
+    </div>
+
+    <div class="card">
+      <div class="cmd-row">
+        <strong>Si por algún motivo hay que abrirlo a mano</strong>
+        <span class="why">Doble clic sobre <span class="mono">usqay-print-client.exe</span>. Se abre una ventana negra (consola) — hay que dejarla abierta; si se cierra, se detiene la impresión.</span>
+      </div>
+      <div class="cmd-row">
+        <strong>Ver qué impresoras reconoce Windows</strong>
+        <code>usqay-print-client.exe -list</code>
+        <span class="why">Útil cuando desarrollo está configurando una impresora nueva y pregunta cómo se llama en esa PC.</span>
+      </div>
+      <div class="cmd-row">
+        <strong>Imprimir un ticket de prueba</strong>
+        <code>usqay-print-client.exe -insert</code>
+        <span class="why">Mete un pedido de prueba en la cola para comprobar que la impresora funciona, sin esperar un pedido real.</span>
+      </div>
+      <div class="cmd-row">
+        <strong>Confirmar que está conectado al servidor</strong>
+        <span class="why">Abrir el archivo de <span class="mono">logs/</span> de hoy y buscar la línea <span class="mono">"registrado con el servidor"</span> cerca del final.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Qué revisar</h2>
+    <p class="section-note">Con esto alcanza en la mayoría de los casos.</p>
+    <div class="card checklist">
+      <div class="check-item">
+        <span class="icon">
+          <svg class="ico" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" stroke="var(--ok)" stroke-width="1.6"/>
+            <path d="M6 10.2l2.6 2.6L14 7.2" stroke="var(--ok)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+          <strong>La computadora está prendida</strong>
+          <span class="detail">El programa arranca solo al encender la PC — no hay que abrir nada.</span>
+        </div>
+      </div>
+      <div class="check-item">
+        <span class="icon">
+          <svg class="ico" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" stroke="var(--ok)" stroke-width="1.6"/>
+            <path d="M6 10.2l2.6 2.6L14 7.2" stroke="var(--ok)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+          <strong>La impresora está encendida y con papel</strong>
+          <span class="detail">Sin papel o apagada, los pedidos se acumulan esperando y se imprimen todos juntos cuando se resuelve.</span>
+        </div>
+      </div>
+      <div class="check-item">
+        <span class="icon">
+          <svg class="ico" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" stroke="var(--ok)" stroke-width="1.6"/>
+            <path d="M6 10.2l2.6 2.6L14 7.2" stroke="var(--ok)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+          <strong>Si quieres confirmar que está corriendo</strong>
+          <span class="detail">Abre el Administrador de tareas de Windows y busca el proceso <span class="mono">usqay-print-client.exe</span> en la pestaña "Detalles".</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Qué NO hacer</h2>
+    <div class="card no-list">
+      <div class="no-item">
+        <span class="icon">
+          <svg class="ico" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" stroke="var(--danger)" stroke-width="1.6"/>
+            <path d="M7 7l6 6M13 7l-6 6" stroke="var(--danger)" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div>
+          <strong>No apagues ni reinicies la PC varias veces</strong>
+          <span class="detail" style="display:block; font-size:13.5px; color:var(--text-dim); margin-top:2px;">Reiniciar no acelera la reconexión — el programa ya lo intenta solo cada pocos segundos.</span>
+        </div>
+      </div>
+      <div class="no-item">
+        <span class="icon">
+          <svg class="ico" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" stroke="var(--danger)" stroke-width="1.6"/>
+            <path d="M7 7l6 6M13 7l-6 6" stroke="var(--danger)" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div>
+          <strong>No cierres el proceso desde el Administrador de tareas</strong>
+          <span class="detail" style="display:block; font-size:13.5px; color:var(--text-dim); margin-top:2px;">Si lo cierras, se detiene la impresión hasta que alguien lo vuelva a abrir.</span>
+        </div>
+      </div>
+      <div class="no-item">
+        <span class="icon">
+          <svg class="ico" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" stroke="var(--danger)" stroke-width="1.6"/>
+            <path d="M7 7l6 6M13 7l-6 6" stroke="var(--danger)" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div>
+          <strong>No borres ni muevas la carpeta del programa</strong>
+          <span class="detail" style="display:block; font-size:13.5px; color:var(--text-dim); margin-top:2px;">Ahí se guardan los pedidos que todavía no se imprimieron.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="info-card">
+      <span class="icon">
+        <svg class="ico" width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+          <circle cx="11" cy="11" r="9" stroke="var(--accent)" stroke-width="1.7"/>
+          <path d="M11 10v5.2" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="11" cy="7.3" r="1.05" fill="var(--accent)"/>
+        </svg>
+      </span>
+      <p><strong>Cuando vuelve la señal, no hay que hacer nada.</strong> El programa se reconecta solo en cuestión de segundos y avisa al servidor cuáles pedidos ya se imprimieron mientras estuvo desconectado.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Si el problema sigue</h2>
+    <p class="section-note">Antes de escalar, probar en este orden:</p>
+    <div class="card steps">
+      <div class="step"><span class="step-num"></span><p>Revisar el cable de red o el wifi del local — ¿otros equipos también están sin internet?</p></div>
+      <div class="step"><span class="step-num"></span><p>Revisar que la impresora esté prendida, con papel y sin atascos.</p></div>
+      <div class="step"><span class="step-num"></span><p>Esperar un minuto — la reconexión automática puede tardar unos segundos si la caída fue larga.</p></div>
+      <div class="step"><span class="step-num"></span><p>Si nada de esto resuelve, un solo reinicio de la computadora (no varios seguidos).</p></div>
+    </div>
+
+    <div class="escalate">
+      <p class="escalate-title">
+        <svg class="ico" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M10 2.5l8.2 14.2H1.8L10 2.5z" stroke="var(--danger)" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M10 8v3.6" stroke="var(--danger)" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="10" cy="14.2" r="0.95" fill="var(--danger)"/>
+        </svg>
+        Escalar al área de desarrollo
+      </p>
+      <p>Si después de estos pasos el problema sigue, consulta con el área de desarrollo. Para que puedan ayudar más rápido, ten a mano:</p>
+      <ul>
+        <li>Nombre del local y de la terminal (por ejemplo <span class="mono">caja-01</span>).</li>
+        <li>Hora aproximada en que empezó el problema.</li>
+        <li>Una foto o captura de pantalla si aparece algún mensaje de error.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    El binario ya viene instalado — esta guía cubre solo qué hacer si se cae la conexión, no la instalación.
+  </footer>
+
+</div>

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"usqay-print-client/internal/config"
+	"usqay-print-client/internal/localapi"
 	"usqay-print-client/internal/logging"
 	"usqay-print-client/internal/printer"
 	"usqay-print-client/internal/queue"
@@ -123,8 +124,12 @@ func main() {
 		conn.Notify(jobID, estado, errMsg)
 	}, cfg.CapturePRN, prnDir, cfg.MaxRetries)
 
+	// --- Servidor HTTP local (Propuesta 1: modo offline en LAN) ---
+	localSrv := localapi.NewServer(cfg, repo)
+
 	go conn.Run(ctx)
 	go worker.Run(ctx)
+	go localSrv.Run(ctx)
 
 	// --- Esperar señal de apagado (Ctrl+C o SIGTERM) ---
 	quit := make(chan os.Signal, 1)

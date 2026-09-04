@@ -86,6 +86,16 @@ func (r *Repository) Upsert(job PrintJob) error {
 	return nil
 }
 
+// Enqueue inserts a new job, or replaces an existing one when reimpresion is true.
+// Shared by the WebSocket and local HTTP entry points so both apply the same duplicate/reprint semantics.
+// Returns ErrDuplicate (via errors.Is) when reimpresion is false and the job ID already exists.
+func (r *Repository) Enqueue(job PrintJob, reimpresion bool) error {
+	if reimpresion {
+		return r.Upsert(job)
+	}
+	return r.Insert(job)
+}
+
 // NextPending returns the oldest PENDING job whose next_retry_at is null or has passed,
 // or nil if the queue is empty or all pending jobs are waiting for retry.
 func (r *Repository) NextPending() (*PrintJob, error) {
