@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
+
+	"github.com/mattn/go-isatty"
 )
 
 // ANSI color codes for terminal output.
@@ -36,11 +39,40 @@ type ConsoleHandler struct {
 	w     io.Writer
 	level slog.Level
 	attrs []slog.Attr
+	color bool
 }
 
-// NewConsoleHandler creates a ConsoleHandler that writes colorized output to w.
+// NewConsoleHandler creates a ConsoleHandler that writes to w, colorized only
+// when w is a terminal that renders ANSI escapes. Writing raw escape codes to
+// a non-ANSI console (e.g. Windows' legacy conhost over SSH/pwsh without
+// virtual terminal processing enabled) prints them as literal garbage instead
+// of colors, so detection happens once here instead of assuming support.
 func NewConsoleHandler(w io.Writer, level slog.Level) *ConsoleHandler {
-	return &ConsoleHandler{w: w, level: level}
+	return &ConsoleHandler{w: w, level: level, color: supportsColor(w)}
+}
+
+// supportsColor reports whether w is a terminal capable of rendering ANSI
+// escape codes. On Windows it also tries to enable virtual terminal
+// processing on the console handle, since that's off by default outside
+// Windows Terminal.
+func supportsColor(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	fd := f.Fd()
+	if !isatty.IsTerminal(fd) && !isatty.IsCygwinTerminal(fd) {
+		return false
+	}
+	return enableVirtualTerminal(fd)
+}
+
+// c returns code when colors are enabled for this handler, or "" otherwise.
+func (h *ConsoleHandler) c(code string) string {
+	if h.color {
+		return code
+	}
+	return ""
 }
 
 func (h *ConsoleHandler) Enabled(_ context.Context, level slog.Level) bool {
@@ -51,12 +83,12 @@ func (h *ConsoleHandler) Handle(_ context.Context, r slog.Record) error {
 	var buf bytes.Buffer
 
 	// Timestamp — dim gray
-	fmt.Fprintf(&buf, "%s%s%s ", ansiGray, r.Time.Format("15:04:05"), ansiReset)
+	fmt.Fprintf(&buf, "%s%s%s ", h.c(ansiGray), r.Time.Format("15:04:05"), h.c(ansiReset))
 
 	// Level — colored, fixed 5-char width
-	buf.WriteString(levelColor(r.Level))
+	buf.WriteString(h.c(levelColor(r.Level)))
 	buf.WriteString(levelLabel(r.Level))
-	buf.WriteString(ansiReset)
+	buf.WriteString(h.c(ansiReset))
 	buf.WriteString(" ")
 
 	// Extract "src" from pre-attached attrs and record attrs.
@@ -79,9 +111,9 @@ func (h *ConsoleHandler) Handle(_ context.Context, r slog.Record) error {
 	})
 
 	// Source tag — colored, fixed 9-char width so messages align
-	buf.WriteString(srcColor(src))
+	buf.WriteString(h.c(srcColor(src)))
 	buf.WriteString(srcLabel(src))
-	buf.WriteString(ansiReset)
+	buf.WriteString(h.c(ansiReset))
 	buf.WriteString(" ")
 
 	// Message
@@ -94,7 +126,7 @@ func (h *ConsoleHandler) Handle(_ context.Context, r slog.Record) error {
 			if i > 0 {
 				buf.WriteByte(' ')
 			}
-			fmt.Fprintf(&buf, "%s%s=%s%s", ansiGray, a.Key, ansiReset, fmtValue(a.Value))
+			fmt.Fprintf(&buf, "%s%s=%s%s", h.c(ansiGray), a.Key, h.c(ansiReset), fmtValue(a.Value))
 		}
 	}
 	buf.WriteByte('\n')
@@ -109,7 +141,7 @@ func (h *ConsoleHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	next := make([]slog.Attr, len(h.attrs)+len(attrs))
 	copy(next, h.attrs)
 	copy(next[len(h.attrs):], attrs)
-	return &ConsoleHandler{w: h.w, level: h.level, attrs: next}
+	return &ConsoleHandler{w: h.w, level: h.level, attrs: next, color: h.color}
 }
 
 func (h *ConsoleHandler) WithGroup(_ string) slog.Handler { return h }
