@@ -10,7 +10,7 @@ El objetivo de este formato es desacoplar el agente local (`usqay-print-client`)
 
 El JSON de impresión consta de tres secciones principales:
 1. `options`: Parámetros de control físico del ticket.
-2. `margins`: Parámetros de dimensión física del papel.
+2. `paper_properties`: Parámetros de dimensión física del papel, escala y márgenes de 4 lados.
 3. `body`: Un array ordenado de bloques de diseño que componen el ticket.
 
 ```json
@@ -19,10 +19,15 @@ El JSON de impresión consta de tres secciones principales:
     "cut": true,
     "drawer": false
   },
-  "margins": {
-    "dimension_papel": 80.0,
-    "altura_dimension": 0.0,
-    "padding": 2.0
+  "paper_properties": {
+    "width": 80.0,
+    "scale": 1.0,
+    "padding": [
+      1.5,
+      1.5,
+      1.5,
+      1.5
+    ]
   },
   "body": [
     // Array de bloques...
@@ -43,16 +48,15 @@ Define el comportamiento del hardware antes o después de procesar el cuerpo del
 
 ---
 
-## 2. Márgenes (`margins`)
+## 2. Propiedades de Papel (`paper_properties`)
 
-Define el tamaño físico del papel y los márgenes en milímetros.
+Define el tamaño físico del papel, el factor de escala y los márgenes en milímetros.
 
 | Campo | Tipo | Requerido | Descripción |
 |---|---|---|---|
-| `dimension_papel` | `number` (float) | Sí (o `ancho_dimension`) | Ancho físico del papel en mm (ej. `80.0`, `58.0`). Reemplaza al campo legado `ancho_dimension`. |
-| `ancho_dimension` | `number` (float) | No (Legado) | Campo antiguo para compatibilidad hacia atrás. Si está presente y `dimension_papel` está vacío, se usa este valor. |
-| `altura_dimension` | `number` (float) | Sí | Presente en el schema pero **no utilizado actualmente** por el agente. `0.0` representa papel continuo (rollo térmico). |
-| `padding` | `number` (float) | No | Espaciado interno en mm a aplicar a la izquierda y derecha. Sirve para centrar texto o evitar que se corte en los bordes. Por defecto `0.0`. |
+| `width` | `number` (float) | Sí | Ancho físico del papel en mm (ej. `80.0`, `58.0`, `70.0`). |
+| `scale` | `number` (float) | No | Factor multiplicador de escala sobre la base visual por defecto (1.4x). Por defecto `1.0` (aplica 1.4x). Si se envía `1.5`, aplica `1.4 × 1.5 = 2.1x`; si se envía `2.0`, aplica `1.4 × 2.0 = 2.8x`. |
+| `padding` | `array` de 4 floats | No | Array con 4 márgenes en mm en formato CSS `[top, right, bottom, left]` (arriba, derecha, abajo, izquierda). Por defecto `[0.0, 0.0, 0.0, 0.0]`. |
 
 ---
 

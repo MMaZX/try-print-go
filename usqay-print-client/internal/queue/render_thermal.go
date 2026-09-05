@@ -56,6 +56,7 @@ type thermalCtx struct {
 	printWidthDots int
 	dpi            int
 	prof           printer.DeviceProfile
+	scale          float64
 }
 
 // RenderThermal convierte un PrintPayload JSON en bytes ESC/POS para
@@ -75,17 +76,15 @@ func RenderThermal(prof *printer.DeviceProfile, payloadJSON string) ([]byte, err
 		return nil, fmt.Errorf("payload sin bloques en body")
 	}
 
-	activeProf := resolveActiveProfile(prof, p.Margins)
+	activeProf := resolveActiveProfile(prof, p.PaperProperties)
 	dots := activeProf.WidthDots
-	charWidth := activeProf.CharWidthDots
+	scale := p.PaperProperties.EffectiveScale()
+	charWidth := int(math.Round(float64(activeProf.CharWidthDots) * scale))
 	if charWidth <= 0 {
 		charWidth = 12
 	}
 
-	anchoPapelMM := p.Margins.DimensionPapel
-	if anchoPapelMM <= 0 {
-		anchoPapelMM = p.Margins.AnchoDimension
-	}
+	anchoPapelMM := p.PaperProperties.Width
 	totalPaperDots := dots
 	if payloadDots, _ := paperGeometry(anchoPapelMM); payloadDots > 0 {
 		totalPaperDots = payloadDots
@@ -96,10 +95,11 @@ func RenderThermal(prof *printer.DeviceProfile, payloadJSON string) ([]byte, err
 	if totalPaperDots > dots {
 		leftMarginDots = (totalPaperDots - dots) / 2
 	}
-	if p.Margins.Padding > 0 {
-		paddingDots := int(math.Round(p.Margins.Padding * 8.0))
-		leftMarginDots += paddingDots
-		printWidthDots -= 2 * paddingDots
+	leftPadDots := int(math.Round(p.PaperProperties.LeftMM() * 8.0))
+	rightPadDots := int(math.Round(p.PaperProperties.RightMM() * 8.0))
+	if leftPadDots > 0 || rightPadDots > 0 {
+		leftMarginDots += leftPadDots
+		printWidthDots -= (leftPadDots + rightPadDots)
 		if printWidthDots < 96 {
 			printWidthDots = 96
 		}
@@ -109,6 +109,7 @@ func RenderThermal(prof *printer.DeviceProfile, payloadJSON string) ([]byte, err
 		printWidthDots: printWidthDots,
 		dpi:            activeProf.DPI,
 		prof:           activeProf,
+		scale:          scale,
 	}
 
 	conn := &memoryConnector{}
@@ -220,11 +221,22 @@ func newTicketEngine(ctx thermalCtx) (*ticketimage.Engine, error) {
 	if dpi <= 0 {
 		dpi = 203
 	}
-	return ticketimage.NewEngine(ticketimage.Config{
+	cfg := ticketimage.Config{
 		PaperPxWidth:            ctx.printWidthDots,
 		DPI:                     dpi,
 		AutoAdjustCursorOnScale: true,
-	})
+	}
+	if ctx.scale > 0 && ctx.scale != 1.0 {
+		baseAWidth := float64(ctx.prof.CharWidthDots)
+		if baseAWidth <= 0 {
+			baseAWidth = 12.0
+		}
+		cfg.FontAWidth = baseAWidth * ctx.scale
+		cfg.FontAHeight = (baseAWidth * 2.0) * ctx.scale
+		cfg.FontBWidth = (baseAWidth * 0.75) * ctx.scale
+		cfg.FontBHeight = (baseAWidth * 2.0) * ctx.scale
+	}
+	return ticketimage.NewEngine(cfg)
 }
 
 // flushTicketImage binariza el lienzo acumulado en eng y lo emite como uno o

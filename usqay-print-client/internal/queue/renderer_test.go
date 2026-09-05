@@ -47,7 +47,7 @@ func assertContains(t *testing.T, text, want string) {
 func TestRenderText(t *testing.T) {
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{"type": "text", "value": "TICKET DE PRUEBA", "align": "center", "bold": true, "size": "double"},
 			{"type": "text", "value": "línea izquierda"},
@@ -71,7 +71,7 @@ func TestRenderText(t *testing.T) {
 func TestRenderSeparatorSpacer(t *testing.T) {
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{"type": "separator", "character": "="},
 			{"type": "spacer", "lines": 2},
@@ -89,7 +89,7 @@ func TestRenderSeparatorSpacer(t *testing.T) {
 func TestRenderTableWithColumns(t *testing.T) {
 	payload := `{
 		"options": {"cut": true, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{
 				"type": "table",
@@ -135,7 +135,7 @@ func TestRenderTableWithColumns(t *testing.T) {
 func TestRenderTableAutoColumns(t *testing.T) {
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{
 				"type": "table",
@@ -162,7 +162,7 @@ func TestRenderTableAutoColumns(t *testing.T) {
 func TestRenderTableMerge(t *testing.T) {
 	payload := `{
 		"options": {"cut": true, "drawer": false},
-		"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 58.0},
 		"body": [
 			{"type": "text", "value": "** COMANDA **", "align": "center", "bold": true},
 			{
@@ -197,7 +197,7 @@ func TestRenderTableMerge(t *testing.T) {
 func TestRenderColumns(t *testing.T) {
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{
 				"type": "columns",
@@ -233,7 +233,7 @@ func TestRenderColumns(t *testing.T) {
 func TestRenderQR(t *testing.T) {
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{"type": "qr", "value": "https://app.usqay.com/c/abc123", "align": "center", "size": 6}
 		]
@@ -253,7 +253,7 @@ func TestRenderQR(t *testing.T) {
 func TestRenderBarcode(t *testing.T) {
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{
 				"type": "barcode",
@@ -280,7 +280,7 @@ func TestRenderBarcode(t *testing.T) {
 func TestRenderTicketPrecuenta(t *testing.T) {
 	payload := `{
 		"options": {"cut": true, "drawer": true},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
 			{"type": "separator", "character": "="},
@@ -466,7 +466,7 @@ func TestRenderStructuredEmitsPrintAreaWidth(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := fmt.Sprintf(`{
 				"options": {"cut": false, "drawer": false},
-				"margins": {"ancho_dimension": %v, "altura_dimension": 0.0},
+				"paper_properties": {"width": %v},
 				"body": [{"type": "text", "value": "x"}]
 			}`, tc.anchoDim)
 
@@ -487,7 +487,7 @@ func TestRenderStructuredCentersNarrowProfile(t *testing.T) {
 	// Payload asks for 80mm paper (576 dots)
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [{"type": "text", "value": "x"}]
 	}`
 	data, err := RenderThermal(profile, payload)
@@ -512,7 +512,7 @@ func TestRenderInvalidPayload(t *testing.T) {
 }
 
 func TestRenderEmptyBody(t *testing.T) {
-	payload := `{"options": {"cut": false, "drawer": false}, "margins": {"ancho_dimension": 80}, "body": []}`
+	payload := `{"options": {"cut": false, "drawer": false}, "paper_properties": {"width": 80}, "body": []}`
 	_, err := RenderThermal(nil, payload)
 	if err == nil {
 		t.Error("esperaba error para body vacío")
@@ -522,7 +522,7 @@ func TestRenderEmptyBody(t *testing.T) {
 func TestRenderUnknownBlockSkipped(t *testing.T) {
 	payload := `{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 80.0},
 		"body": [
 			{"type": "unknown_block", "foo": "bar"},
 			{"type": "text", "value": "visible"}
@@ -575,7 +575,7 @@ func TestGoldenSuite(t *testing.T) {
 			name: "ticket_80_no_padding",
 			payload: `{
 				"options": {"cut": true, "drawer": true},
-				"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0, "padding": 0.0},
+				"paper_properties": {"width": 80.0, "scale": 1.0, "padding": [0.0, 0.0, 0.0, 0.0]},
 				"body": [
 					{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
 					{"type": "separator", "character": "="},
@@ -620,7 +620,7 @@ func TestGoldenSuite(t *testing.T) {
 			name: "ticket_80_with_padding",
 			payload: `{
 				"options": {"cut": true, "drawer": true},
-				"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0, "padding": 1.5},
+				"paper_properties": {"width": 80.0, "scale": 1.0, "padding": [1.5, 1.5, 1.5, 1.5]},
 				"body": [
 					{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
 					{"type": "separator", "character": "="},
@@ -651,7 +651,7 @@ func TestGoldenSuite(t *testing.T) {
 			name: "ticket_58_no_padding",
 			payload: `{
 				"options": {"cut": true, "drawer": false},
-				"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0, "padding": 0.0},
+				"paper_properties": {"width": 58.0, "scale": 1.0, "padding": [0.0, 0.0, 0.0, 0.0]},
 				"body": [
 					{"type": "text", "value": "** COMANDA **", "align": "center", "bold": true},
 					{
@@ -673,7 +673,7 @@ func TestGoldenSuite(t *testing.T) {
 			name: "ticket_58_with_padding",
 			payload: `{
 				"options": {"cut": true, "drawer": false},
-				"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0, "padding": 0.5},
+				"paper_properties": {"width": 58.0, "scale": 1.0, "padding": [0.5, 0.5, 0.5, 0.5]},
 				"body": [
 					{"type": "text", "value": "** COMANDA **", "align": "center", "bold": true},
 					{
@@ -695,7 +695,7 @@ func TestGoldenSuite(t *testing.T) {
 			name: "ticket_70_custom",
 			payload: `{
 				"options": {"cut": false, "drawer": false},
-				"margins": {"ancho_dimension": 70.0, "altura_dimension": 0.0, "padding": 0.0},
+				"paper_properties": {"width": 70.0, "scale": 1.0, "padding": [0.0, 0.0, 0.0, 0.0]},
 				"body": [
 					{"type": "text", "value": "TICKET CUSTOM 70MM", "align": "center"},
 					{"type": "barcode", "symbology": "CODE128", "value": "B001-00000042", "align": "center", "height": 80, "hri": "below"}
@@ -716,7 +716,7 @@ func TestGoldenSuite(t *testing.T) {
 			},
 			payload: `{
 				"options": {"cut": true, "drawer": true},
-				"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0, "padding": 0.0},
+				"paper_properties": {"width": 80.0, "scale": 1.0, "padding": [0.0, 0.0, 0.0, 0.0]},
 				"body": [
 					{"type": "text", "value": "RESTAURANTE USQAY", "align": "center", "bold": true, "size": "double"},
 					{"type": "separator", "character": "="},
@@ -788,7 +788,7 @@ func TestRenderStructuredImage(t *testing.T) {
 
 	payload := fmt.Sprintf(`{
 		"options": {"cut": false, "drawer": false},
-		"margins": {"ancho_dimension": 58.0, "altura_dimension": 0.0},
+		"paper_properties": {"width": 58.0},
 		"body": [
 			{
 				"type": "image",

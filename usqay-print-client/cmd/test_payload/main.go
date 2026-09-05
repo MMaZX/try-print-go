@@ -22,7 +22,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// prof=nil: se deriva del margins.dimension_papel del propio payload,
+	// prof=nil: se deriva del paper_properties.width del propio payload,
 	// igual que hace el agente cuando el servidor no manda perfil explícito.
 	data, err := queue.RenderThermal(nil, string(raw))
 	if err != nil {

@@ -142,7 +142,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/jobs \
     "impresora_name_id": "impresora-local",
     "tipo": "RED",
     "documento_slug": "comanda",
-    "payload": {"options":{"cut":false,"drawer":false},"margins":{"ancho_dimension":80.0},"body":[{"type":"text","value":"PRUEBA LOCAL"}]}
+    "payload": {"options":{"cut":false,"drawer":false},"paper_properties":{"width":80.0},"body":[{"type":"text","value":"PRUEBA LOCAL"}]}
   }'
 ```
 

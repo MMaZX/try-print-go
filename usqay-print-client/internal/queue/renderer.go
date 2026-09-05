@@ -15,9 +15,9 @@ import (
 
 // PrintPayload es el payload raíz de un trabajo de impresión.
 type PrintPayload struct {
-	Options PrintOptions      `json:"options"`
-	Margins PrintMargins      `json:"margins"`
-	Body    []json.RawMessage `json:"body"`
+	Options         PrintOptions     `json:"options"`
+	PaperProperties PaperProperties  `json:"paper_properties"`
+	Body            []json.RawMessage `json:"body"`
 }
 
 // PrintOptions controla el comportamiento del hardware.
@@ -26,12 +26,55 @@ type PrintOptions struct {
 	Drawer bool `json:"drawer"`
 }
 
-// PrintMargins define el tamaño físico del papel y márgenes.
-type PrintMargins struct {
-	DimensionPapel  float64 `json:"dimension_papel"`
-	AnchoDimension  float64 `json:"ancho_dimension"` // Legado/fallback
-	AlturaDimension float64 `json:"altura_dimension"`
-	Padding         float64 `json:"padding"`
+// PaperProperties define la geometría física del papel, escala y márgenes de 4 lados.
+type PaperProperties struct {
+	Width   float64   `json:"width"`
+	Scale   float64   `json:"scale"`
+	Padding []float64 `json:"padding"` // Convención [top, right, bottom, left] en mm
+}
+
+// TopMM devuelve el margen superior en mm (default 0.0).
+func (p PaperProperties) TopMM() float64 {
+	if len(p.Padding) > 0 {
+		return p.Padding[0]
+	}
+	return 0.0
+}
+
+// RightMM devuelve el margen derecho en mm (default 0.0).
+func (p PaperProperties) RightMM() float64 {
+	if len(p.Padding) > 1 {
+		return p.Padding[1]
+	}
+	return 0.0
+}
+
+// BottomMM devuelve el margen inferior en mm (default 0.0).
+func (p PaperProperties) BottomMM() float64 {
+	if len(p.Padding) > 2 {
+		return p.Padding[2]
+	}
+	return 0.0
+}
+
+// LeftMM devuelve el margen izquierdo en mm (default 0.0).
+func (p PaperProperties) LeftMM() float64 {
+	if len(p.Padding) > 3 {
+		return p.Padding[3]
+	}
+	return 0.0
+}
+
+// BaseDefaultScale es la escala estándar por defecto del motor de renderizado (1.4x de la fuente base).
+const BaseDefaultScale = 1.4
+
+// EffectiveScale devuelve el factor de escala global aplicando la base por defecto de 1.4.
+func (p PaperProperties) EffectiveScale() float64 {
+	scale := p.Scale
+	if scale <= 0 {
+		scale = 1.0
+	}
+	return BaseDefaultScale * scale
 }
 
 // blockEnvelope inspecciona el campo type sin deserializar el bloque completo.
@@ -141,14 +184,11 @@ func renderText(profile *printer.DeviceProfile, payload string) ([]byte, error) 
 	return renderStructuredText(profile, p)
 }
 
-func resolveActiveProfile(prof *printer.DeviceProfile, margins PrintMargins) printer.DeviceProfile {
+func resolveActiveProfile(prof *printer.DeviceProfile, paper PaperProperties) printer.DeviceProfile {
 	if prof != nil {
 		return *prof
 	}
-	anchoPapelMM := margins.DimensionPapel
-	if anchoPapelMM <= 0 {
-		anchoPapelMM = margins.AnchoDimension
-	}
+	anchoPapelMM := paper.Width
 	if anchoPapelMM > 0 {
 		return printer.DeriveProfileFromWidth(anchoPapelMM)
 	}
@@ -158,16 +198,17 @@ func resolveActiveProfile(prof *printer.DeviceProfile, margins PrintMargins) pri
 // --- Renderer de texto plano ---
 
 func renderStructuredText(prof *printer.DeviceProfile, payload PrintPayload) ([]byte, error) {
-	activeProf := resolveActiveProfile(prof, payload.Margins)
+	activeProf := resolveActiveProfile(prof, payload.PaperProperties)
 	dots := activeProf.WidthDots
 	charWidth := activeProf.CharWidthDots
 	if charWidth <= 0 {
 		charWidth = 12
 	}
 
-	if payload.Margins.Padding > 0 {
-		paddingDots := int(math.Round(payload.Margins.Padding * 8.0))
-		dots = dots - (2 * paddingDots)
+	leftPadDots := int(math.Round(payload.PaperProperties.LeftMM() * 8.0))
+	rightPadDots := int(math.Round(payload.PaperProperties.RightMM() * 8.0))
+	if leftPadDots > 0 || rightPadDots > 0 {
+		dots = dots - (leftPadDots + rightPadDots)
 		if dots < 96 {
 			dots = 96
 		}

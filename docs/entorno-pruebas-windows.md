@@ -56,14 +56,27 @@ ssh -o BatchMode=yes -o ConnectTimeout=5 <user>@<host> "echo ok"
    cd usqay-print-client
    GOOS=windows GOARCH=amd64 go build -o dist/<binario>.exe ./cmd/<paquete>
    ```
-2. Copiar el binario a la VM (`remote_dir` de `windows-test.yaml`):
+   Binarios comunes en `cmd/`:
+   - `client`: Agente principal (`usqay-print-client.exe`).
+   - `test_payload`: Prueba de render térmico con un payload JSON (`test_payload.exe <printer_name> <payload.json>`).
+   - `test_widths`: Calibración de anchos de papel (`58`, `70`, `80` mm).
+   - `test_fontsize`: Verificación de fuentes y tamaños.
+   - `test_image_print`: Prueba de impresión de imágenes raster.
+
+2. Copiar el binario y archivos de prueba a la VM (`remote_dir` de `windows-test.yaml`):
    ```bash
    scp dist/<binario>.exe <user>@<host>:<remote_dir>/<binario>.exe
    ```
+
 3. Ejecutar remotamente por SSH no interactivo, pasando el **nombre de la impresora** (no un device path):
    ```bash
+   # Para herramientas de test directo:
    ssh <user>@<host> "<remote_dir>/<binario>.exe <printer_name>"
+
+   # Para probar un JSON de payload específico con test_payload:
+   ssh <user>@<host> "Set-Location '<remote_dir>'; .\\test_payload.exe <printer_name> <payload.json>"
    ```
+
 4. Revisar el ticket físico impreso en la VM (no hay forma automatizable de verificar el resultado físico:
    requiere que un humano mire el papel o una foto).
 

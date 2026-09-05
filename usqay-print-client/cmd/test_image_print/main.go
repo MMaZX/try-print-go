@@ -14,10 +14,10 @@ const samplePayload = `{
     "cut": true,
     "drawer": false
   },
-  "margins": {
-    "dimension_papel": 58.0,
-    "altura_dimension": 0.0,
-    "padding": 1.0
+  "paper_properties": {
+    "width": 58.0,
+    "scale": 1.0,
+    "padding": [1.0, 1.0, 1.0, 1.0]
   },
   "body": [
     {

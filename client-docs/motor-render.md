@@ -73,7 +73,7 @@ El cliente no encasilla el ancho en dos tamaños rígidos (58mm y 80mm). En su l
 1. **Ancla 1 (58 mm)**: Área de impresión real de **384 dots (puntos)**.
 2. **Ancla 2 (80 mm)**: Área de impresión real de **576 dots (puntos)**.
 
-Con el valor de `dimension_papel` provisto en el JSON (o fallback a `ancho_dimension`), se calcula la fracción:
+Con el valor de `paper_properties.width` provisto en el JSON, se calcula la fracción:
 $$\text{fracción} = \frac{\text{anchoMM} - 58.0}{80.0 - 58.0}$$
 $$\text{dots} = 384.0 + \text{fracción} \times (576.0 - 384.0)$$
 
@@ -85,7 +85,7 @@ $$\text{ancho en caracteres} = \text{dots} / 12$$
 - Para 80mm, el área suele ser de **48 caracteres** de ancho.
 - Para 58mm, el área suele ser de **32 caracteres** de ancho.
 
-*Margen Físico:* Si el payload define un valor de `padding` (margen físico en milímetros), este se convierte a dots ($1\text{ mm} \approx 8\text{ dots}$) y se restan simétricamente del área imprimible, ajustando el ancho útil de caracteres de manera proporcional.
+*Margen Físico:* Si el payload define márgenes en `paper_properties.padding` (en milímetros `[top, right, bottom, left]`), los márgenes laterales se convierten a dots ($1\text{ mm} \approx 8\text{ dots}$) y se restan del área imprimible, ajustando el ancho útil de caracteres de manera proporcional.
 
 ---
 

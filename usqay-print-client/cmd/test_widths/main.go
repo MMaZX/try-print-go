@@ -11,7 +11,7 @@ import (
 
 const payloadTemplate = `{
   "options": {"cut": true, "drawer": false},
-  "margins": {"dimension_papel": %v, "altura_dimension": 0.0, "padding": 0.0},
+  "paper_properties": {"width": %v, "scale": 1.0, "padding": [0.0, 0.0, 0.0, 0.0]},
   "body": [
     {"type": "text", "value": "ANCHO PAPEL: %v mm", "align": "center", "bold": true, "size": "medium"},
     {"type": "separator", "character": "="},
@@ -55,7 +55,7 @@ func main() {
 	payload := fmt.Sprintf(payloadTemplate, widthMM, widthMM)
 
 	// prof=nil: fuerza a RenderThermal a derivar el perfil desde
-	// margins.dimension_papel (printer.DeriveProfileFromWidth), que es
+	// paper_properties.width (printer.DeriveProfileFromWidth), que es
 	// exactamente lo que hace hoy el agente cuando el servidor no manda
 	// perfil explícito de la impresora.
 	data, err := queue.RenderThermal(nil, payload)

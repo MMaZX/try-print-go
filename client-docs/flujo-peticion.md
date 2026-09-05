@@ -117,7 +117,7 @@ Cuando el backend genera un ticket (por ejemplo, una orden de cocina o boleta de
   "reimpresion": false,
   "payload": {
     "options": { "cut": true, "drawer": false },
-    "margins": { "dimension_papel": 80.0, "padding": 0.0 },
+    "paper_properties": { "width": 80.0, "scale": 1.0, "padding": [0.0, 0.0, 0.0, 0.0] },
     "body": [
       { "type": "text", "value": "MESA 5", "bold": true, "size": "double", "align": "center" },
       { "type": "separator" },

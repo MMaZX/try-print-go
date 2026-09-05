@@ -31,7 +31,7 @@ Investigar antes de proponer encontró más piezas ya construidas de las que par
 | Resiliencia offline del agente (épica 5) | `usqay-print-client` | Config cacheada en SQLite, reintentos con backoff, impresión sin conexión activa (`docs/entorno-local-sin-servidor-real.md`) |
 | Outbox de pedidos/cobros/inventario | `rest_web_react/electron/sync/sync-engine.js` | Cola local en SQLite (`local_pedidos`, `local_cobros`, ...), sync contra `/tenant/sync/offline` con `idempotency_key`, ya maneja conflictos 409/422 |
 | Outbox de impresión | `rest_web_react/lib/print-dispatch.ts` + `electron/sync/print-retry.js` | Cola local (`local_trabajos_impresion`), contrato `PrintJob` ya tipado, reintento cada 30s hasta 10 intentos |
-| Contrato `PrintJob` | `rest_web_react/lib/print-dispatch.ts` | `job_id`, `terminal_id`, `impresora_name_id`, `documento_slug`, `payload.{options,margins,body}` — **ya compatible** con lo que espera `renderer.go` del cliente Go (mismos nombres de campo en `margins`) |
+| Contrato `PrintJob` | `rest_web_react/lib/print-dispatch.ts` | `job_id`, `terminal_id`, `impresora_name_id`, `documento_slug`, `payload.{options,paper_properties,body}` — compatible con lo que espera `renderer.go` del cliente Go |
 | Servidor de impresión con protocolo probado | `usqay-print-server` | Register/Config/PrintJob/Sync por WebSocket, ya validado en LAN pura (ver `docs/laboratorio-offline.html`) |
 
 La pieza que **no existe todavía** es cómo un trabajo de impresión llega desde la máquina de Electron hasta

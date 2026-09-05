@@ -107,7 +107,7 @@ func TestE2E_DropAndReconnect(t *testing.T) {
 
 		if count == 1 {
 			// Primera conexión: enviar job de impresión
-			payload := json.RawMessage(`{"options":{"cut":false,"drawer":false},"margins":{"ancho_dimension":80.0},"body":[{"type":"text","value":"E2E DROP-RECONNECT"}]}`)
+			payload := json.RawMessage(`{"options":{"cut":false,"drawer":false},"paper_properties":{"width":80.0},"body":[{"type":"text","value":"E2E DROP-RECONNECT"}]}`)
 			printMsg := PrintJobMsg{
 				Type:            TypePrint,
 				JobID:           "e2e-job-1",
