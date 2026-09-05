@@ -44,3 +44,8 @@ logs/
 
 # Credenciales reales del entorno de pruebas Windows (ver *.example.yaml)
 usqay-print-client/windows-test.yaml
+
+# Golden files de render (bytes .prn) — se regeneran localmente con
+# UPDATE_GOLDEN=true, no se versionan porque cambian con cada ajuste de
+# layout/render y no aportan como diff legible.
+usqay-print-client/internal/queue/testdata/goldens/*.prn
