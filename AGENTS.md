@@ -102,9 +102,8 @@ Se comprobó (2026-08-18) que escribir ESC/POS crudo a `/dev/usb/lp0` en Linux c
 impresoras térmicas clon (artefactos, corte que no llega, impresión incompleta), incluso con pacing
 agresivo. El driver Windows del fabricante (spooler `winspool.drv`) no tiene ese problema.
 
-**Regla:** toda prueba que implique imprimir físicamente (layout, raster, corte, cajón, velocidad real) se
-hace en la VM Windows por SSH, nunca en Linux. Compilar, `go vet`, `go test ./...` sí se hacen en Linux
-normalmente — solo la impresión física migra a Windows.
+**Regla:** toda prueba que implique imprimir físicamente (raster en hardware, corte, cajón, velocidad real) se
+hace en la VM Windows por SSH, nunca en Linux. Compilar, `go vet`, `go test ./...` y **la validación visual del diseño mediante imágenes PNG** sí se hacen en Linux normalmente (ver [`docs/PREVIEW.md`](docs/PREVIEW.md)) — solo la impresión física final migra a Windows.
 
 Flujo y credenciales: ver [`docs/entorno-pruebas-windows.md`](docs/entorno-pruebas-windows.md). Las
 credenciales de conexión viven en `usqay-print-client/windows-test.yaml` (gitignored, nunca en

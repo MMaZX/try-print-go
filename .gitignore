@@ -36,6 +36,12 @@ bin/
 usqay-print-client/build/
 usqay-print-server/build/
 
+# Artefactos de distribución y salidas de preview (binarios, .zip, PNGs
+# generados, inserts.sql): se regeneran localmente, no se versionan.
+dist/
+usqay-print-client/dist/
+usqay-print-server/dist/
+
 # Local database and logs
 agent.db
 logs/

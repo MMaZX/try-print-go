@@ -2,6 +2,8 @@ package ticketimage
 
 import (
 	"image/color"
+	"image/draw"
+	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -199,11 +201,21 @@ func (tr *TextRenderer) renderChar(char rune, x, y, width, height float64) {
 	}
 }
 
-// drawChar draws a character using TrueType fonts (scaled or unscaled).
-// Siempre pasa por DrawCharScaled (con scaleW=scaleH=1 cuando no hay
-// escala) para que todo el texto, escalado o no, se beneficie del
-// sobremuestreo de nitidez — ver FontManager.DrawCharScaled.
+// drawChar draws a character using TrueType fonts (scaled or unscaled) or
+// vector primitives for kitchen and typographic symbols (like ↳ or •).
 func (tr *TextRenderer) drawChar(char rune, x, y float64, col color.Color) {
+	metrics := tr.fonts.GetScaledMetrics(tr.state.FontName, tr.state.ScaleW, tr.state.ScaleH)
+
+	// Símbolos vectoriales nativos para comandas de cocina y notas
+	if char == '↳' || char == '\u21b3' || char == '⤷' || char == '\u2937' {
+		drawVectorArrow(tr.canvas.Image(), int(x), int(y), metrics.GlyphWidth, metrics.GlyphHeight, col)
+		return
+	}
+	if char == '•' || char == '\u2022' {
+		drawVectorBullet(tr.canvas.Image(), int(x), int(y), metrics.GlyphWidth, metrics.GlyphHeight, col)
+		return
+	}
+
 	tr.fonts.DrawCharScaled(
 		tr.canvas.Image(),
 		tr.state.FontName,
@@ -214,6 +226,66 @@ func (tr *TextRenderer) drawChar(char rune, x, y float64, col color.Color) {
 		tr.state.ScaleH,
 		col,
 	)
+}
+
+// drawVectorArrow dibuja una flecha de notas o modificadores de plato '↳'
+// de forma vectorial nítida sobre el lienzo.
+func drawVectorArrow(img draw.Image, x, y int, targetW, targetH float64, col color.Color) {
+	w := targetW
+	h := targetH
+	thickness := int(math.Round(w * 0.14))
+	if thickness < 2 {
+		thickness = 2
+	}
+
+	startX := x + int(w*0.25)
+	startY := y - int(h*0.72)
+	cornerY := y - int(h*0.28)
+	endX := x + int(w*0.82)
+
+	// 1. Línea vertical que desciende
+	for py := startY; py <= cornerY; py++ {
+		for t := 0; t < thickness; t++ {
+			img.Set(startX+t, py, col)
+		}
+	}
+
+	// 2. Línea horizontal hacia la derecha
+	for px := startX; px <= endX; px++ {
+		for t := 0; t < thickness; t++ {
+			img.Set(px, cornerY-t, col)
+		}
+	}
+
+	// 3. Punta de flecha (apuntando a la derecha)
+	arrowSize := int(w * 0.28)
+	if arrowSize < 3 {
+		arrowSize = 3
+	}
+	for i := 0; i <= arrowSize; i++ {
+		for t := 0; t < thickness; t++ {
+			img.Set(endX-i, (cornerY-i)+t, col)
+			img.Set(endX-i, (cornerY+i)+t, col)
+		}
+	}
+}
+
+// drawVectorBullet dibuja una viñeta '•' centrada geométricamente.
+func drawVectorBullet(img draw.Image, x, y int, targetW, targetH float64, col color.Color) {
+	radius := int(targetW * 0.16)
+	if radius < 2 {
+		radius = 2
+	}
+	centerX := x + int(targetW*0.5)
+	centerY := y - int(targetH*0.4)
+
+	for dy := -radius; dy <= radius; dy++ {
+		for dx := -radius; dx <= radius; dx++ {
+			if dx*dx+dy*dy <= radius*radius {
+				img.Set(centerX+dx, centerY+dy, col)
+			}
+		}
+	}
 }
 
 // FIXME: The WrapText method now calculates charsPerLine directly instead of using state.CharsPerLine(charWidth).

@@ -17,7 +17,23 @@ import (
 type PrintPayload struct {
 	Options         PrintOptions     `json:"options"`
 	PaperProperties PaperProperties  `json:"paper_properties"`
+	Margins         *legacyMargins   `json:"margins,omitempty"`
 	Body            []json.RawMessage `json:"body"`
+}
+
+type legacyMargins struct {
+	DimensionPapel float64 `json:"dimension_papel"`
+	Padding        float64 `json:"padding"`
+}
+
+func (p *PrintPayload) applyLegacyMargins() {
+	if p.PaperProperties.Width <= 0 && p.Margins != nil && p.Margins.DimensionPapel > 0 {
+		p.PaperProperties.Width = p.Margins.DimensionPapel
+		if p.Margins.Padding > 0 && len(p.PaperProperties.Padding) == 0 {
+			pad := p.Margins.Padding
+			p.PaperProperties.Padding = []float64{pad, pad, pad, pad}
+		}
+	}
 }
 
 // PrintOptions controla el comportamiento del hardware.
@@ -181,6 +197,7 @@ func renderText(profile *printer.DeviceProfile, payload string) ([]byte, error) 
 	if len(p.Body) == 0 {
 		return nil, fmt.Errorf("payload sin bloques en body")
 	}
+	p.applyLegacyMargins()
 	return renderStructuredText(profile, p)
 }
 
