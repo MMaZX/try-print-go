@@ -286,3 +286,72 @@ func TestRepository_Retry(t *testing.T) {
 		}
 	})
 }
+
+func TestRepository_Delete(t *testing.T) {
+	t.Run("Delete elimina trabajo existente y es idempotente", func(t *testing.T) {
+		repo := setupTestDB(t)
+
+		job := queue.PrintJob{
+			ID:            "job-del-1",
+			Payload:       `{"body":[{"type":"text","value":"hola"}]}`,
+			TipoDocumento: "comanda",
+			ImpresoraID:   "impr-1",
+			Estado:        queue.EstadoPending,
+			CreatedAt:     time.Now().UTC(),
+			UpdatedAt:     time.Now().UTC(),
+		}
+		if err := repo.Insert(job); err != nil {
+			t.Fatalf("Insert falló: %v", err)
+		}
+
+		if err := repo.Delete("job-del-1"); err != nil {
+			t.Fatalf("Delete falló: %v", err)
+		}
+
+		// Verificar que ya no existe
+		pending, err := repo.ListByStatus(queue.EstadoPending)
+		if err != nil {
+			t.Fatalf("ListByStatus falló: %v", err)
+		}
+		if len(pending) != 0 {
+			t.Errorf("se esperaba 0 jobs, got %d", len(pending))
+		}
+
+		// Idempotencia: borrar nuevamente no debe retornar error
+		if err := repo.Delete("job-del-1"); err != nil {
+			t.Errorf("Delete segundo llamado retornó error: %v", err)
+		}
+	})
+
+	t.Run("DeleteBatch elimina múltiples trabajos", func(t *testing.T) {
+		repo := setupTestDB(t)
+
+		for _, id := range []string{"batch-1", "batch-2", "batch-3"} {
+			job := queue.PrintJob{
+				ID:            id,
+				Payload:       `{}`,
+				TipoDocumento: "boleta",
+				ImpresoraID:   "impr-1",
+				Estado:        queue.EstadoPrinted,
+				CreatedAt:     time.Now().UTC(),
+				UpdatedAt:     time.Now().UTC(),
+			}
+			if err := repo.Insert(job); err != nil {
+				t.Fatalf("Insert falló: %v", err)
+			}
+		}
+
+		if err := repo.DeleteBatch([]string{"batch-1", "batch-2"}); err != nil {
+			t.Fatalf("DeleteBatch falló: %v", err)
+		}
+
+		pending, err := repo.ListByStatus(queue.EstadoPending)
+		if err != nil {
+			t.Fatalf("ListByStatus falló: %v", err)
+		}
+		if len(pending) != 1 || pending[0].ID != "batch-3" {
+			t.Errorf("se esperaba solo batch-3 restante, got %+v", pending)
+		}
+	})
+}
+

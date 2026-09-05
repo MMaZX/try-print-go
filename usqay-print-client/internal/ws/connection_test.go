@@ -1,10 +1,18 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"usqay-print-client/internal/config"
 	"usqay-print-client/internal/printer"
@@ -232,3 +240,84 @@ func TestConnection_ApplyConfig_PersistsToSQLite(t *testing.T) {
 		t.Errorf("freshConn.terminalID = %q, want 'caja-bar'", freshConn.terminalID)
 	}
 }
+
+func TestConnection_Notify_DeletesJobFromSQLiteAfterDelivery(t *testing.T) {
+	msgReceived := make(chan AckMsg, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		for {
+			var msg AckMsg
+			if err := wsjson.Read(r.Context(), conn, &msg); err != nil {
+				return
+			}
+			msgReceived <- msg
+		}
+	}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, repo, _ := setupTestConnection(t, "caja-del")
+	conn.cfg.ServerURL = wsURL
+
+	// Insertar dos jobs en DB
+	now := time.Now().UTC()
+	for _, id := range []string{"job-ok", "job-err"} {
+		_ = repo.Insert(queue.PrintJob{
+			ID:            id,
+			Payload:       `{}`,
+			TipoDocumento: "comanda",
+			ImpresoraID:   "p1",
+			Estado:        queue.EstadoPending,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wsConn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("websocket.Dial falló: %v", err)
+	}
+	defer wsConn.Close(websocket.StatusNormalClosure, "")
+
+	go func() {
+		_ = conn.writeLoop(ctx, wsConn)
+	}()
+
+	// Notificar éxito (PRINTED) y error (ERROR)
+	conn.Notify("job-ok", queue.EstadoPrinted, "")
+	conn.Notify("job-err", queue.EstadoError, "fallo de prueba")
+
+	// Esperar que el servidor reciba ambos mensajes
+	for i := 0; i < 2; i++ {
+		select {
+		case <-msgReceived:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout esperando mensaje en servidor mock")
+		}
+	}
+
+	// Verificar que ambos jobs fueron eliminados de SQLite
+	waitFor(t, 2*time.Second, func() bool {
+		pending, err := repo.ListByStatus(queue.EstadoPending)
+		if err != nil {
+			return false
+		}
+		printed, err := repo.ListByStatus(queue.EstadoPrinted)
+		if err != nil {
+			return false
+		}
+		errs, err := repo.ListByStatus(queue.EstadoError)
+		if err != nil {
+			return false
+		}
+		return len(pending) == 0 && len(printed) == 0 && len(errs) == 0
+	})
+}
+

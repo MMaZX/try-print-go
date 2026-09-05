@@ -24,7 +24,8 @@ const (
 
 // outMsg is an outgoing message queued by the worker or the connection itself.
 type outMsg struct {
-	data any
+	data  any
+	jobID string // If non-empty, job to delete from SQLite repository upon successful delivery
 }
 
 // Connection manages the WebSocket connection to the print server, including
@@ -62,7 +63,10 @@ func (c *Connection) Notify(jobID string, estado queue.Estado, errMsg string) {
 		return
 	}
 	select {
-	case c.outgoing <- outMsg{data: AckMsg{Type: msgType, JobID: jobID, Msg: errMsg}}:
+	case c.outgoing <- outMsg{
+		data:  AckMsg{Type: msgType, JobID: jobID, Msg: errMsg},
+		jobID: jobID,
+	}:
 	default:
 		slog.Warn("notificación descartada (canal lleno), se sincronizará al reconectar", "job_id", jobID)
 	}
@@ -153,6 +157,21 @@ func (c *Connection) handshake(ctx context.Context, wsConn *websocket.Conn) erro
 		return fmt.Errorf("enviar sync: %w", err)
 	}
 	slog.Info("sync enviado", "trabajos_impresos_locales", len(syncMsg.PrintedJobs))
+	if len(syncMsg.PrintedJobs) > 0 {
+		if err := c.repo.DeleteBatch(syncMsg.PrintedJobs); err != nil {
+			slog.Error("error eliminando trabajos sincronizados de SQLite", "error", err)
+		} else {
+			slog.Debug("trabajos sincronizados eliminados de SQLite", "cantidad", len(syncMsg.PrintedJobs))
+		}
+	}
+
+	// Encolar reenvío y eliminación de trabajos que terminaron en error definitivo mientras estuvo offline
+	errJobs, err := c.repo.ListByStatus(queue.EstadoError)
+	if err == nil {
+		for _, j := range errJobs {
+			c.Notify(j.ID, queue.EstadoError, j.ErrorMsg)
+		}
+	}
 	return nil
 }
 
@@ -187,6 +206,13 @@ func (c *Connection) writeLoop(ctx context.Context, wsConn *websocket.Conn) erro
 		case out := <-c.outgoing:
 			if err := wsjson.Write(ctx, wsConn, out.data); err != nil {
 				return fmt.Errorf("enviar mensaje: %w", err)
+			}
+			if out.jobID != "" {
+				if err := c.repo.Delete(out.jobID); err != nil {
+					slog.Error("error eliminando trabajo completado de SQLite", "job_id", out.jobID, "error", err)
+				} else {
+					slog.Debug("trabajo completado eliminado de SQLite", "job_id", out.jobID)
+				}
 			}
 		}
 	}

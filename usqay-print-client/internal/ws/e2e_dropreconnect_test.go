@@ -234,4 +234,10 @@ func TestE2E_DropAndReconnect(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout esperando SyncMsg de reconexión tras caída")
 	}
+
+	// Paso F: Verificar que tras sincronizar con el servidor, el trabajo impreso fue eliminado de SQLite
+	waitFor(t, 3*time.Second, func() bool {
+		jobs, err := repo.ListByStatus(queue.EstadoPrinted)
+		return err == nil && len(jobs) == 0
+	})
 }

@@ -178,6 +178,45 @@ func (r *Repository) UpdateStatusWithAttempts(id string, estado Estado, intentos
 	return nil
 }
 
+// Delete removes a job from the print_jobs table once completed and reported to the server.
+// It is idempotent (returns nil if the job does not exist).
+func (r *Repository) Delete(id string) error {
+	_, err := r.db.Exec(`DELETE FROM print_jobs WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("eliminar trabajo %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteBatch removes multiple jobs from the print_jobs table in a single transaction.
+func (r *Repository) DeleteBatch(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("iniciar transacción delete: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`DELETE FROM print_jobs WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("preparar delete statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, id := range ids {
+		if _, err := stmt.Exec(id); err != nil {
+			return fmt.Errorf("eliminar trabajo en lote %s: %w", id, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete batch: %w", err)
+	}
+	return nil
+}
+
 // ListByStatus returns all jobs with the given state, ordered by creation time.
 func (r *Repository) ListByStatus(estado Estado) ([]PrintJob, error) {
 	rows, err := r.db.Query(

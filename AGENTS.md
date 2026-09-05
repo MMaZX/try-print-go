@@ -51,7 +51,9 @@ Cliente responde ACK inmediato: { type: "received", job_id }
     ↓
 Worker local procesa e imprime físicamente
     ↓
-Cliente actualiza a PRINTED y notifica al servidor
+Cliente actualiza a PRINTED y notifica al servidor (o retiene offline hasta reconectar y enviar sync)
+    ↓
+Cliente elimina el trabajo de SQLite tras notificar exitosamente (la persistencia histórica la maneja Laravel)
 ```
 
 ### 2. Compilación condicional para impresión por sistema operativo
