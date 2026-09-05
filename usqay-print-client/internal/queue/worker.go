@@ -135,7 +135,7 @@ func (w *Worker) processNext() {
 	if p.Mode() == "text" {
 		data, renderErr = renderText(prof, job.Payload)
 	} else {
-		data, renderErr = RenderImage(prof, job.Payload)
+		data, renderErr = RenderThermal(prof, job.Payload)
 	}
 	renderSecs := time.Since(renderStart).Seconds()
 

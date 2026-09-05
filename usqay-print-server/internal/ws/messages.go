@@ -26,15 +26,14 @@ type Envelope struct {
 
 // --- Client → Server ---
 
-// RegisterMsg is the first message sent by a print agent on connect.
-// TerminalID is optional: it is used only for local-dev token fallback.
-// In production with LaravelBaseURL configured, the server derives the
-// terminal identity from the token via the agents/validate endpoint.
+// RegisterMsg is the first message sent by a print agent on connect. The
+// server derives the terminal identity (business_id, terminal_id) entirely
+// from the token via Laravel's agents/validate endpoint — the client does
+// not send terminal_id.
 type RegisterMsg struct {
-	Type       string `json:"type"`
-	TerminalID string `json:"terminal_id,omitempty"`
-	Token      string `json:"token"`
-	Version    string `json:"version,omitempty"`
+	Type    string `json:"type"`
+	Token   string `json:"token"`
+	Version string `json:"version,omitempty"`
 }
 
 // ReceivedMsg acknowledges that a job was stored locally in SQLite.

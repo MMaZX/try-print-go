@@ -77,7 +77,9 @@ El cuerpo es un array de objetos JSON, donde cada objeto representa una instrucc
 
 ### 3.1. Bloque de Texto (`type: "text"`)
 
-Representa una línea de texto plano con opciones de formato.
+Representa un párrafo de texto plano con opciones de formato. Si `value` no entra en el ancho del papel
+(típico con `size: "medium"`/`"double"`, donde cada carácter ocupa más espacio) se envuelve automáticamente
+en tantas líneas como haga falta — no se corta en el borde del papel ni afecta al resto del ticket.
 
 ```json
 {
@@ -91,10 +93,13 @@ Representa una línea de texto plano con opciones de formato.
 
 | Campo | Tipo | Requerido | Descripción |
 |---|---|---|---|
-| `value` | `string` | Sí | El contenido textual a imprimir. |
+| `value` | `string` | Sí | El contenido textual a imprimir. Se envuelve (word-wrap) automáticamente si no entra en una línea. |
 | `align` | `string` | No | Alineación horizontal: `"left"` (por defecto), `"center"`, `"right"`. |
 | `bold` | `boolean` | No | Activa negrita. Por defecto `false`. |
 | `size` | `string` | No | `"normal"` (por defecto), `"medium"` (altura doble), `"double"` (altura + ancho doble). |
+
+> **Nota (2026-09-05):** antes de esta fecha `value` se imprimía en una sola línea y el texto que no entraba
+> en el ancho del papel se cortaba en el borde. Ahora se envuelve en líneas adicionales.
 
 ---
 
@@ -275,7 +280,9 @@ Imprime un código QR. En impresoras térmicas ESC/POS se renderiza nativamente;
 |---|---|---|---|
 | `value` | `string` | Sí | La URL o texto a codificar en el QR. |
 | `align` | `string` | No | Alineación horizontal: `"left"`, `"center"` (por defecto), `"right"`. |
-| `size` | `integer` | No | Tamaño del módulo en píxeles (entre `1` y `16`). Por defecto `6`. |
+| `size` | `integer` | No | Ancho final del QR en píxeles (ej. `120`, `200`, `300`). Se recorta automáticamente al ancho imprimible del papel si lo excede. Por defecto `128`. |
+
+> **Nota de migración (2026-09-05):** antes de esta fecha `size` representaba el tamaño de módulo en píxeles (1-16), no el ancho final del QR. Se cambió porque con el motor de render anterior ese valor terminaba siempre recortado al ancho máximo del papel para cualquier número por encima de ~16, haciendo el campo inútil para controlar el tamaño real impreso. Si tu integración todavía manda valores en el rango 1-16 esperando el comportamiento viejo, actualízala para mandar el ancho en píxeles directamente.
 
 ---
 

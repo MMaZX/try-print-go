@@ -55,6 +55,21 @@ func TestAPIRoutes(t *testing.T) {
 	hub := ws.NewHub(cfg)
 	router := buildRouter(hub, cfg)
 
+	// Test GET /healthz (sin X-Internal-Token, debe responder igual)
+	req0 := httptest.NewRequest("GET", "/healthz", nil)
+	rr0 := httptest.NewRecorder()
+	router.ServeHTTP(rr0, req0)
+	if rr0.Code != http.StatusOK {
+		t.Errorf("expected /healthz status 200, got %v", rr0.Code)
+	}
+	var health map[string]any
+	if err := json.Unmarshal(rr0.Body.Bytes(), &health); err != nil {
+		t.Fatalf("failed to decode /healthz response: %v", err)
+	}
+	if health["status"] != "ok" {
+		t.Errorf("expected /healthz status field 'ok', got %v", health["status"])
+	}
+
 	// Test GET /api/v1/agents (Empty initially)
 	req := httptest.NewRequest("GET", "/api/v1/agents", nil)
 	req.Header.Set("X-Internal-Token", "secret123")

@@ -19,6 +19,7 @@ type Client struct {
 	conn        *websocket.Conn
 	terminalID  string
 	businessID  string
+	token       string        // agent token, kept for re-validating with Laravel on config-refresh
 	printers    []PrinterSpec // populated from Laravel validate response
 	connectedAt time.Time
 	lastPing    time.Time
@@ -45,7 +46,7 @@ func (c *Client) Kick(reason string) {
 
 // ServeHTTP upgrades the HTTP connection to WebSocket and serves the client
 // for the full duration of the connection. Blocking — called from http.Handler.
-func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *http.Request) {
+func ServeHTTP(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true, // allow any Origin for the POC
 	})
@@ -76,7 +77,7 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 	}()
 
 	// Step 1: Register handshake (10s timeout).
-	if err := c.handleRegister(tokens); err != nil {
+	if err := c.handleRegister(); err != nil {
 		slog.Warn("registro fallido", "remote", r.RemoteAddr, "error", err)
 		// Close frame explícito en vez de depender solo del defer conn.CloseNow():
 		// sin esto el cliente ve un EOF crudo y no tiene forma de saber que el
@@ -102,10 +103,12 @@ func ServeHTTP(hub *Hub, tokens map[string]string, w http.ResponseWriter, r *htt
 }
 
 // handleRegister reads and validates the first message on the connection.
-// In Laravel mode the terminal identity is derived from the token; the client
-// does not need to supply terminal_id. In local-dev mode terminal_id is still
-// read from the RegisterMsg and matched against the tokens map.
-func (c *Client) handleRegister(tokens map[string]string) error {
+// The terminal identity (business_id, terminal_id) is derived entirely from
+// Laravel's validation of the token — the client does not supply it. There is
+// no local/offline fallback: if Laravel is unreachable or unconfigured, the
+// registration fails outright rather than degrading to an unauthenticated or
+// shared-bucket mode (ver CLAUDE.md: no defaults silenciosos para campos críticos).
+func (c *Client) handleRegister() error {
 	regCtx, regCancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer regCancel()
 
@@ -130,45 +133,13 @@ func (c *Client) handleRegister(tokens map[string]string) error {
 		return fmt.Errorf("token vacío en mensaje de registro")
 	}
 
-	var (
-		valid      bool
-		terminalID string
-		businessID string
-		printers   []PrinterSpec
-	)
+	if c.hub.cfg.LaravelBaseURL == "" {
+		return fmt.Errorf("laravel_base_url no configurado — el servidor no puede validar agentes")
+	}
 
-	if c.hub.cfg.LaravelBaseURL != "" {
-		var valErr error
-		valid, terminalID, businessID, printers, valErr = c.validateWithLaravel(reg.Token)
-		if valErr != nil {
-			// Laravel unreachable — fall back to local token map if the client
-			// still supplied terminal_id (compatible with old clients/dev setups).
-			slog.Warn("error validando con Laravel, intentando fallback local", "error", valErr)
-			if reg.TerminalID != "" {
-				if expected, ok := tokens[reg.TerminalID]; ok && expected == reg.Token {
-					valid = true
-					terminalID = reg.TerminalID
-					businessID = "local-fallback"
-				}
-			}
-		}
-	} else {
-		if len(tokens) == 0 {
-			// No auth configured — open mode for dev/testing.
-			valid = true
-			terminalID = reg.TerminalID
-			if terminalID == "" {
-				terminalID = "unknown"
-			}
-			businessID = "no-auth"
-			slog.Warn("modo sin autenticación activo", "terminal_id", terminalID)
-		} else if reg.TerminalID != "" {
-			if expected, ok := tokens[reg.TerminalID]; ok && expected == reg.Token {
-				valid = true
-				terminalID = reg.TerminalID
-				businessID = "local-development"
-			}
-		}
+	valid, terminalID, businessID, printers, err := c.validateWithLaravel(reg.Token)
+	if err != nil {
+		return fmt.Errorf("validar con Laravel: %w", err)
 	}
 
 	if !valid {
@@ -180,6 +151,7 @@ func (c *Client) handleRegister(tokens map[string]string) error {
 
 	c.terminalID = terminalID
 	c.businessID = businessID
+	c.token = reg.Token
 	c.printers = printers
 	c.connectedAt = time.Now().UTC()
 	c.lastPing = time.Now().UTC()
@@ -237,6 +209,29 @@ func (c *Client) validateWithLaravel(token string) (valid bool, terminalID, busi
 	}
 
 	return res.Valid, res.TerminalID, res.BusinessID, res.Printers, nil
+}
+
+// RefreshConfig re-validates this agent's token with Laravel and pushes the
+// resulting printer list over the already-open connection. Unlike a Kick, the
+// WebSocket is never touched — the client applies the new config in place
+// (see applyConfig client-side), so in-flight print jobs and the connection
+// itself are unaffected. Returns an error if the token is no longer valid or
+// Laravel is unreachable; the caller decides what to do with a failed refresh.
+func (c *Client) RefreshConfig() error {
+	valid, terminalID, businessID, printers, err := c.validateWithLaravel(c.token)
+	if err != nil {
+		return fmt.Errorf("validar con Laravel: %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("token ya no es válido")
+	}
+	if terminalID != c.terminalID || businessID != c.businessID {
+		return fmt.Errorf("identidad de terminal cambió durante el refresh (terminal_id=%s business_id=%s)", terminalID, businessID)
+	}
+
+	c.printers = printers
+	c.Send(ConfigMsg{Type: TypeConfig, TerminalID: c.terminalID, Printers: c.printers})
+	return nil
 }
 
 // readPump reads messages from the WebSocket and dispatches them.

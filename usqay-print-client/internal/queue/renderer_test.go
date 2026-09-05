@@ -26,11 +26,11 @@ func mustRenderText(t *testing.T, payload string) string {
 	return string(b)
 }
 
-func mustRenderESCPOS(t *testing.T, payload string) []byte {
+func mustRenderThermal(t *testing.T, payload string) []byte {
 	t.Helper()
-	b, err := render(nil, payload)
+	b, err := RenderThermal(nil, payload)
 	if err != nil {
-		t.Fatalf("render falló: %v", err)
+		t.Fatalf("RenderThermal falló: %v", err)
 	}
 	return b
 }
@@ -60,7 +60,7 @@ func TestRenderText(t *testing.T) {
 	assertContains(t, text, "línea izquierda")
 	assertContains(t, text, "derecha")
 
-	data := mustRenderESCPOS(t, payload)
+	data := mustRenderThermal(t, payload)
 	if len(data) == 0 {
 		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
@@ -124,7 +124,7 @@ func TestRenderTableWithColumns(t *testing.T) {
 	assertContains(t, text, "Total a pagar:")
 	assertContains(t, text, "S/ 47.00")
 
-	data := mustRenderESCPOS(t, payload)
+	data := mustRenderThermal(t, payload)
 	if len(data) == 0 {
 		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
@@ -186,7 +186,7 @@ func TestRenderTableMerge(t *testing.T) {
 	assertContains(t, text, "↳ Bien tostado, sin cebollita")
 	assertContains(t, text, "LOMO SALTADO")
 
-	data := mustRenderESCPOS(t, payload)
+	data := mustRenderThermal(t, payload)
 	if len(data) == 0 {
 		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
@@ -222,7 +222,7 @@ func TestRenderColumns(t *testing.T) {
 	assertContains(t, text, "Mozo:")
 	assertContains(t, text, "Juan Pérez")
 
-	data := mustRenderESCPOS(t, payload)
+	data := mustRenderThermal(t, payload)
 	if len(data) == 0 {
 		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
@@ -242,7 +242,7 @@ func TestRenderQR(t *testing.T) {
 	text := mustRenderText(t, payload)
 	assertContains(t, text, "[QR: https://app.usqay.com/c/abc123]")
 
-	data := mustRenderESCPOS(t, payload)
+	data := mustRenderThermal(t, payload)
 	if len(data) == 0 {
 		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
@@ -269,7 +269,7 @@ func TestRenderBarcode(t *testing.T) {
 	text := mustRenderText(t, payload)
 	assertContains(t, text, "[BARCODE CODE128: B001-00000042]")
 
-	data := mustRenderESCPOS(t, payload)
+	data := mustRenderThermal(t, payload)
 	if len(data) == 0 {
 		t.Fatal("se esperaba output ESC/POS no vacío")
 	}
@@ -331,7 +331,7 @@ func TestRenderTicketPrecuenta(t *testing.T) {
 	assertContains(t, text, "TOTAL:")
 	assertContains(t, text, "S/ 55.46")
 
-	data := mustRenderESCPOS(t, payload)
+	data := mustRenderThermal(t, payload)
 	if len(data) == 0 {
 		t.Fatal("se esperaba output ESC/POS no vacío para ticket precuenta completo")
 	}
@@ -470,7 +470,7 @@ func TestRenderStructuredEmitsPrintAreaWidth(t *testing.T) {
 				"body": [{"type": "text", "value": "x"}]
 			}`, tc.anchoDim)
 
-			data := mustRenderESCPOS(t, payload)
+			data := mustRenderThermal(t, payload)
 			if !bytes.Contains(data, tc.wantBytes) {
 				t.Errorf("esperaba encontrar comando GS L/GS W %x en la salida, got %x", tc.wantBytes, data)
 			}
@@ -490,9 +490,9 @@ func TestRenderStructuredCentersNarrowProfile(t *testing.T) {
 		"margins": {"ancho_dimension": 80.0, "altura_dimension": 0.0},
 		"body": [{"type": "text", "value": "x"}]
 	}`
-	data, err := render(profile, payload)
+	data, err := RenderThermal(profile, payload)
 	if err != nil {
-		t.Fatalf("render falló: %v", err)
+		t.Fatalf("RenderThermal falló: %v", err)
 	}
 	// leftMarginDots = (576 - 384) / 2 = 96 dots = 0x60, 0x00
 	// printWidthDots = 384 dots = 0x80, 0x01
@@ -505,7 +505,7 @@ func TestRenderStructuredCentersNarrowProfile(t *testing.T) {
 // --- Error handling ---
 
 func TestRenderInvalidPayload(t *testing.T) {
-	_, err := render(nil, "esto no es json")
+	_, err := RenderThermal(nil, "esto no es json")
 	if err == nil {
 		t.Error("esperaba error para payload inválido")
 	}
@@ -513,7 +513,7 @@ func TestRenderInvalidPayload(t *testing.T) {
 
 func TestRenderEmptyBody(t *testing.T) {
 	payload := `{"options": {"cut": false, "drawer": false}, "margins": {"ancho_dimension": 80}, "body": []}`
-	_, err := render(nil, payload)
+	_, err := RenderThermal(nil, payload)
 	if err == nil {
 		t.Error("esperaba error para body vacío")
 	}
@@ -743,9 +743,9 @@ func TestGoldenSuite(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotBytes, err := render(tc.profile, tc.payload)
+			gotBytes, err := RenderThermal(tc.profile, tc.payload)
 			if err != nil {
-				t.Fatalf("render falló: %v", err)
+				t.Fatalf("RenderThermal falló: %v", err)
 			}
 
 			goldenPath := filepath.Join(goldensDir, tc.name+".prn")
@@ -799,17 +799,21 @@ func TestRenderStructuredImage(t *testing.T) {
 		]
 	}`, b64Image)
 
-	data, err := render(profile, payload)
+	data, err := RenderThermal(profile, payload)
 	if err != nil {
-		t.Fatalf("render falló: %v", err)
+		t.Fatalf("RenderThermal falló: %v", err)
 	}
 
-	// targetW = 8 dots, targetH = 8 dots.
-	// widthBytes = 1, xL = 1, xH = 0
-	// yL = 8, yH = 0
-	// command = 1D 76 30 00 01 00 08 00
-	wantBytes := []byte{0x1D, 0x76, 0x30, 0x00, 0x01, 0x00, 0x08, 0x00}
-	if !bytes.Contains(data, wantBytes) {
-		t.Errorf("esperaba encontrar comando GS v 0 %x en la salida, got %x", wantBytes, data)
+	// El ticket entero (incluida la imagen) se compone en un único lienzo y
+	// se emite como una o más tiras GS v 0 (ver flushTicketImage/
+	// writeRasterChunked) — ya no hay un comando aislado del tamaño exacto
+	// de la imagen fuente, así que solo verificamos que el comando raster
+	// aparezca y que el render no haya fallado.
+	gsV0 := []byte{0x1D, 0x76, 0x30}
+	if !bytes.Contains(data, gsV0) {
+		t.Errorf("esperaba encontrar comando GS v 0 (%x) en la salida, got %x", gsV0, data)
+	}
+	if len(data) == 0 {
+		t.Fatal("se esperaba output no vacío")
 	}
 }

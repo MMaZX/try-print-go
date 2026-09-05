@@ -20,11 +20,22 @@ graph TD
 El servidor de impresión se configura mediante un archivo `config.json` ubicado en su misma carpeta, o mediante **variables de entorno** (que toman precedencia).
 
 ### Variables de Entorno / Parámetros
-* **`LARAVEL_BASE_URL`** (config: `laravel_base_url`): URL base del servidor Laravel (ej: `http://192.168.1.100:8000`). Utilizada por Go para validar tokens y reportar estados.
+* **`LARAVEL_BASE_URL`** (config: `laravel_base_url`): URL base del servidor Laravel (ej: `http://192.168.1.100:8000`). Utilizada por Go para validar tokens y reportar estados. **Obligatorio** — el servidor no arranca sin él (`Config.Validate()`), y no existe ningún modo degradado/sin autenticación: sin Laravel no hay forma de validar agentes ni monitores.
 * **`INTERNAL_TOKEN`** (config: `internal_token`): Token secreto compartido para autenticar peticiones REST procedentes de Laravel. Debe enviarse en el header `X-Internal-Token`.
 * **`PORT`** (config: `port`): Puerto de red en el que escucha el servidor Go (por defecto `8080`).
 
 ---
+
+## 0. Health Check
+
+* **Ruta:** `GET /healthz` — **sin autenticación** (no requiere `X-Internal-Token`), pensado para que un orquestador (pm2, Docker, load balancer) lo consulte directamente.
+* **Respuesta (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "terminales_conectados": 3
+}
+```
 
 ## 1. HTTP REST Endpoints (Laravel $\leftrightarrow$ Print Server)
 
@@ -91,7 +102,7 @@ Todas las llamadas de este grupo requieren el header:
   "refreshed": true
 }
 ```
-* **Acción:** Envía una instrucción `{type: "config_refresh"}` al agente para que cierre su WebSocket, se reconecte y descargue la configuración fresca de Laravel.
+* **Acción:** el server vuelve a validar el token del agente contra Laravel (misma llamada que en el registro) y le empuja la lista de impresoras fresca con un `{type: "config"}` sobre el WebSocket ya abierto — **no** desconecta ni reconecta al agente. Ver `docs/config-refresh-impresoras.md`.
 
 ---
 
@@ -184,10 +195,12 @@ Al conectar, el agente envía de inmediato:
   "expira_en": 300
 }
 ```
-* **Refresco de Configuración (`config_refresh`):**
+* **Refresco de Configuración en caliente:** el server manda el mismo mensaje `config` del handshake inicial, con la lista de impresoras actualizada — sobre la conexión ya abierta, sin cerrarla (ver `docs/config-refresh-impresoras.md`):
 ```json
 {
-  "type": "config_refresh"
+  "type": "config",
+  "terminal_id": "2",
+  "printers": [ ... ]
 }
 ```
 

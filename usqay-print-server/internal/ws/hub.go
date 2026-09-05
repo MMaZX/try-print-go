@@ -423,20 +423,26 @@ func (h *Hub) KickAgent(businessID, terminalID string, reason string) bool {
 	return false
 }
 
-// RefreshAgentConfig sends config_refresh message to the agent.
+// RefreshAgentConfig re-validates the agent with Laravel and pushes the updated
+// printer config directly over its already-open connection — no disconnect, no
+// reconnect. Returns false if the terminal isn't connected or the refresh failed
+// (Laravel unreachable, token no longer valid); the caller logs the detail.
 func (h *Hub) RefreshAgentConfig(businessID, terminalID string) bool {
 	key := agentKey{businessID: businessID, terminalID: terminalID}
 	h.mu.RLock()
 	client, found := h.clients[key]
 	h.mu.RUnlock()
 
-	if found {
-		client.Send(map[string]string{
-			"type": "config_refresh",
-		})
-		return true
+	if !found {
+		return false
 	}
-	return false
+
+	if err := client.RefreshConfig(); err != nil {
+		slog.Error("error refrescando configuración del agente en caliente",
+			"business_id", businessID, "terminal_id", terminalID, "error", err)
+		return false
+	}
+	return true
 }
 
 // RegisterMonitor registers a new monitor client.

@@ -162,17 +162,23 @@ func main() {
 	}
 
 	fmt.Println("==================================================")
-	fmt.Println("🚀 PRUEBA DE RENDERIZADO 100% RASTER IMAGE EN GO")
+	fmt.Println("🚀 PRUEBA DE RENDERIZADO TÉRMICO (poster)")
 	fmt.Printf("Dispositivo destino: %s\n", devicePath)
 	fmt.Println("==================================================")
 
 	// 1. Fase de Renderizado
 	renderStart := time.Now()
 	prof := &printer.DeviceProfile{
-		WidthDots: 384,
-		DPI:       203,
+		WidthDots:         384,
+		DPI:               203,
+		CharWidthDots:     12,
+		SupportsCut:       true,
+		SupportsDrawer:    true,
+		SupportsQRNative:  true,
+		SupportsPrintArea: true,
+		SupportsRaster:    true,
 	}
-	rasterBytes, err := queue.RenderImage(prof, samplePayload)
+	rasterBytes, err := queue.RenderThermal(prof, samplePayload)
 	renderSecs := time.Since(renderStart).Seconds()
 
 	if err != nil {

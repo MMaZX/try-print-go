@@ -34,6 +34,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
 	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
 	setupLogger(cfg.LogLevel, nil)
 
 	hub := ws.NewHub(cfg)
@@ -90,12 +94,22 @@ func parseStringID(val any) string {
 func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
 
+	// Health check — sin auth a propósito, para que un orquestador (pm2, docker,
+	// load balancer) pueda consultarlo sin X-Internal-Token.
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":                "ok",
+			"terminales_conectados": len(hub.ConnectedTerminals()),
+		})
+	})
+
 	// WebSocket endpoint — print clients connect here
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ws.ServeHTTP(hub, cfg.Tokens, w, r)
+		ws.ServeHTTP(hub, w, r)
 	})
 	mux.HandleFunc("/ws/agent", func(w http.ResponseWriter, r *http.Request) {
-		ws.ServeHTTP(hub, cfg.Tokens, w, r)
+		ws.ServeHTTP(hub, w, r)
 	})
 
 	// WebSocket endpoint — monitors (browsers) connect here
@@ -191,7 +205,9 @@ func buildRouter(hub *ws.Hub, cfg *config.Config) *http.ServeMux {
 		})
 	}))
 
-	// POST /api/v1/agents/{terminal_id}/config-refresh — Notify agent to reconnect and reload config
+	// POST /api/v1/agents/{terminal_id}/config-refresh — Push updated printer config to the agent
+	// in place (no disconnect/reconnect): re-validates the agent's token with Laravel and sends
+	// the fresh printer list over the already-open WebSocket connection.
 	mux.HandleFunc("POST /api/v1/agents/{terminal_id}/config-refresh", authMiddleware(cfg, func(w http.ResponseWriter, r *http.Request) {
 		terminalID := r.PathValue("terminal_id")
 		businessID := r.URL.Query().Get("business_id")

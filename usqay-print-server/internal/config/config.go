@@ -9,11 +9,10 @@ import (
 
 // Config holds all runtime configuration for the print server.
 type Config struct {
-	Port           int               `json:"port"`
-	LogLevel       string            `json:"log_level"`
-	Tokens         map[string]string `json:"tokens"`           // terminal_id → expected token
-	LaravelBaseURL string            `json:"laravel_base_url"` // Laravel base URL, e.g. http://localhost:8000
-	InternalToken  string            `json:"internal_token"`   // Shared secret token
+	Port           int    `json:"port"`
+	LogLevel       string `json:"log_level"`
+	LaravelBaseURL string `json:"laravel_base_url"` // Laravel base URL, e.g. http://localhost:8000 — obligatorio, sin fallback local
+	InternalToken  string `json:"internal_token"`   // Shared secret token
 }
 
 // Load reads config.json from the executable directory, falling back to cwd.
@@ -25,7 +24,7 @@ func Load() (*Config, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf(
-			"config.json no encontrado en %s — créalo con los campos requeridos (port, tokens)",
+			"config.json no encontrado en %s — créalo con los campos requeridos (port, laravel_base_url, internal_token)",
 			path,
 		)
 	}
@@ -50,6 +49,16 @@ func Load() (*Config, error) {
 		cfg.LaravelBaseURL = envLaravel
 	}
 	return &cfg, nil
+}
+
+// Validate checks that config fields required for the server to authenticate
+// agents are present. Sin laravel_base_url el servidor no tiene ninguna forma
+// de validar tokens — no existe modo degradado ni fallback local.
+func (c *Config) Validate() error {
+	if c.LaravelBaseURL == "" {
+		return fmt.Errorf("laravel_base_url es requerido en config.json — el servidor no puede validar agentes sin él")
+	}
+	return nil
 }
 
 func resolveConfigPath() (string, error) {

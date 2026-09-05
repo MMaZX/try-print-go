@@ -3,7 +3,7 @@
 ## Por qué
 
 El agente (`usqay-print-client`) corre en el POS del cliente, que es **Windows**. Ahí la impresión pasa por el
-Print Spooler (`winspool.drv`) usando el driver ESC/POS instalado del fabricante (ej. `POS-80C`), vía
+Print Spooler (`winspool.drv`) usando el driver ESC/POS instalado del fabricante, vía
 `internal/printer/printer_windows.go`.
 
 En Linux, sin ese driver, solo existe la ruta de escritura cruda al nodo `/dev/usb/lp0`
@@ -22,7 +22,9 @@ en Linux (host de desarrollo) — solo la impresión física migra a Windows.
 VM Windows (QEMU/KVM) con la impresora térmica pasada por USB passthrough, accesible por SSH con
 OpenSSH Server nativo de Windows (shell remota: PowerShell `pwsh`). El driver ESC/POS del fabricante ya
 está instalado ahí como impresora del sistema (`Get-Printer`), por lo que las pruebas usan ese nombre de
-impresora — no un device path.
+impresora — no un device path. En esta VM las impresoras instaladas están nombradas por rol/estación
+(`CAJA`, `COCINA`), no por modelo de driver — confirmar el nombre vigente con `Get-Printer` antes de asumir
+un valor, ya que puede cambiar si se reinstala o reconfigura la VM.
 
 ### Configuración de conexión
 

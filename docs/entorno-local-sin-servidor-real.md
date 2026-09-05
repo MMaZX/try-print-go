@@ -55,19 +55,9 @@ Opción 2.
 
 ### 1. Servidor local
 
-`usqay-print-server/config.json` (no commitear valores reales de producción aquí):
-
-```json
-{
-  "port": 8080,
-  "log_level": "debug"
-}
-```
-
-Sin `tokens` ni `laravel_base_url` el servidor arranca en **modo sin autenticación** (ver
-`internal/ws/client.go`, rama `len(tokens) == 0`): acepta cualquier `terminal_id`/token. Esto alcanza
-para probar conexión/reconexión, pero la lista de impresoras llega vacía porque hoy solo se resuelve
-contra Laravel (`validateWithLaravel`, llamado a `LaravelBaseURL + /api/tenant/print-configuration/agents/validate`).
+El servidor **no tiene modo sin autenticación ni fallback local**: `laravel_base_url` es obligatorio
+(`Config.Validate()` corta el arranque si falta) y toda validación de token — de agente o de monitor —
+pasa siempre por Laravel. No hay forma de levantarlo "a secas" sin un Laravel real o un mock.
 
 Para probar el flujo de impresión completo local necesitas un mock mínimo de ese endpoint. Un
 `http.server` de una sola ruta alcanza (no se commitea, es solo para pruebas manuales):
@@ -122,12 +112,12 @@ descarta, igual que hace el test automatizado.
 
 ### 3. Cliente local
 
-`usqay-print-client/config.json`:
+`usqay-print-client/config.json` (`terminal_id` es opcional del lado cliente — solo llave de caché
+offline; la identidad real la resuelve el server contra el mock de Laravel de arriba, vía el token):
 
 ```json
 {
   "server_url": "ws://127.0.0.1:8080/ws/agent",
-  "terminal_id": "caja-local",
   "token": "cualquier-valor",
   "log_level": "debug"
 }
@@ -147,6 +137,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "job_id": "job-local-1",
+    "business_id": "local-dev",
     "terminal_id": "caja-local",
     "impresora_name_id": "impresora-local",
     "tipo": "RED",
@@ -166,7 +157,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/jobs \
    figura como impreso.
 
 ```bash
-curl -H "X-Internal-Token: local-test-token" http://127.0.0.1:8080/api/v1/agents/caja-local/status
+curl -H "X-Internal-Token: local-test-token" "http://127.0.0.1:8080/api/v1/agents/caja-local/status?business_id=local-dev"
 ```
 
 ## Notas

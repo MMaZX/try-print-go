@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -34,12 +33,8 @@ type Connection struct {
 	cfg        *config.Config
 	repo       *queue.Repository
 	registry   *printer.Registry
-	terminalID string     // set after receiving TypeConfig from the server
+	terminalID string      // set after receiving the first TypeConfig from the server
 	outgoing   chan outMsg // buffered; written by Notify, drained by writeLoop
-	// pendingRefresh is set to true when the server sends config_refresh so that
-	// the next TypeConfig message is logged with a distinctive banner instead of
-	// the normal startup log.
-	pendingRefresh atomic.Bool
 }
 
 // NewConnection creates a Connection. Call Run in a goroutine to activate it.
@@ -171,7 +166,7 @@ func (c *Connection) readLoop(ctx context.Context, wsConn *websocket.Conn) error
 			}
 			return fmt.Errorf("leer: %w", err)
 		}
-		c.dispatch(raw, wsConn)
+		c.dispatch(raw)
 	}
 }
 
@@ -198,7 +193,7 @@ func (c *Connection) writeLoop(ctx context.Context, wsConn *websocket.Conn) erro
 }
 
 // dispatch routes an incoming server message to the appropriate handler.
-func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
+func (c *Connection) dispatch(raw json.RawMessage) {
 	var env Envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		slog.Warn("mensaje del servidor malformado", "error", err)
@@ -238,10 +233,6 @@ func (c *Connection) dispatch(raw json.RawMessage, wsConn *websocket.Conn) {
 		c.applyPrinterConfigUpdate(msg)
 	case TypeKick:
 		slog.Warn("esta terminal fue desplazada por una nueva conexión — reconectando", "src", "SERVER")
-	case "config_refresh":
-		slog.Info("servidor solicitó recargar configuración — reconectando", "src", "SERVER")
-		c.pendingRefresh.Store(true)
-		_ = wsConn.Close(websocket.StatusNormalClosure, "config_refresh")
 	case "ping":
 		select {
 		case c.outgoing <- outMsg{data: map[string]string{"type": "pong"}}:
@@ -361,9 +352,13 @@ func (c *Connection) hydrateRegistry(printers []PrinterSpec, terminalID string) 
 }
 
 // applyConfig populates the printer registry from the ConfigMsg sent by the server.
-// Called each time a TypeConfig message is received (connection and config_refresh).
-// When the cycle was triggered by a config_refresh message the change is logged with
-// a distinctive [CONFIG] banner so it is unmistakable in the log output.
+// Called each time a TypeConfig message is received — both at connection time and
+// whenever the server pushes a live config-refresh over the already-open socket
+// (see hub.RefreshAgentConfig on the server). A TypeConfig arriving after this
+// Connection already has a terminalID is, by definition, a live refresh: the
+// Registry is swapped in place (Registry.Set/Clear are mutex-protected, so this is
+// safe even while the Worker is mid-cycle) — the WebSocket is never touched, so
+// in-flight jobs and the connection itself are unaffected.
 func (c *Connection) applyConfig(msg ConfigMsg) {
 	if c.cfg.TerminalID != "" && msg.TerminalID != c.cfg.TerminalID {
 		slog.Warn("configuración recibida para otra terminal, ignorada",
@@ -371,7 +366,7 @@ func (c *Connection) applyConfig(msg ConfigMsg) {
 		return
 	}
 
-	isRefresh := c.pendingRefresh.Swap(false)
+	isRefresh := c.terminalID != ""
 
 	if isRefresh {
 		slog.Warn("▶ CONFIGURACIÓN ACTUALIZADA POR EL SERVIDOR ◀",

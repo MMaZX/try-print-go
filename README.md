@@ -221,7 +221,7 @@ O con los scripts de la raíz:
 |---|---|---|
 | `POST` | `/api/v1/jobs` | Laravel despacha un nuevo trabajo de impresión |
 | `PUT` | `/api/v1/jobs/{job_id}/status` | Actualiza el estado de un trabajo |
-| `POST` | `/api/v1/agents/{terminal_id}/config-refresh` | Ordena al agente reconectar y recargar su config |
+| `POST` | `/api/v1/agents/{terminal_id}/config-refresh` | Empuja config nueva al agente en caliente, sin reconectar (ver `docs/config-refresh-impresoras.md`) |
 | `GET` | `/api/v1/agents` | Lista todos los agentes conectados actualmente |
 | `GET` | `/api/v1/agents/{terminal_id}/status` | Estado de un agente específico |
 | `GET` | `/api/v1/agents/{terminal_id}/printers` | Solicita al agente las impresoras del OS disponibles |
@@ -374,8 +374,8 @@ build/
 // Respuesta al heartbeat
 { "type": "pong" }
 
-// Config del panel cambió — reconectar para obtener la nueva config
-{ "type": "config_refresh" }
+// Config del panel cambió — se aplica en caliente, mismo mensaje que la config inicial
+{ "type": "config", "terminal_id": "2", "printers": [ ... ] }
 
 // Esta terminal fue desplazada por una conexión más reciente
 { "type": "kick", "reason": "nueva conexión registrada" }

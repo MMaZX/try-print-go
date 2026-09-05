@@ -101,22 +101,14 @@ func (m *MonitorClient) handleAuth() error {
 		return fmt.Errorf("parsear monitor_auth: %w", err)
 	}
 
-	valid := false
-	var valErr error
-	if m.hub.cfg.LaravelBaseURL != "" {
-		valid, valErr = m.hub.validateMonitorTokenWithLaravel(auth.Token)
-		if valErr != nil {
-			slog.Warn("error validando monitor token con Laravel, intentando fallback local", "error", valErr)
-			if auth.Token == "abc123" || auth.Token == "test-token" {
-				valid = true
-			}
-		}
-	} else {
-		if auth.Token == "abc123" || auth.Token == "test-token" || auth.Token == "" {
-			valid = true
-		}
+	if m.hub.cfg.LaravelBaseURL == "" {
+		return fmt.Errorf("laravel_base_url no configurado — el servidor no puede validar monitores")
 	}
 
+	valid, err := m.hub.validateMonitorTokenWithLaravel(auth.Token)
+	if err != nil {
+		return fmt.Errorf("validar token de monitor con Laravel: %w", err)
+	}
 	if !valid {
 		return fmt.Errorf("token de monitor inválido")
 	}
