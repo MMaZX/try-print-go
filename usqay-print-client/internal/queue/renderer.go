@@ -282,40 +282,156 @@ func renderStructuredText(prof *printer.DeviceProfile, payload PrintPayload) ([]
 	return []byte(sb.String()), nil
 }
 
-// renderTableText renderiza un bloque table a texto plano.
+// renderTableText renderiza un bloque table a texto plano. Comparte con
+// drawTable (render_thermal.go) el mismo layout de wrap por celda
+// (wrapRowCells/formatRowLine) para que ambos motores produzcan la misma
+// estructura de tabla — la única diferencia es que acá no hay negrita/tamaño.
 func renderTableText(sb *strings.Builder, block TableBlock, totalWidth int) {
 	colWidths, colAligns := resolveTableLayout(block, totalWidth)
 
 	if hasTableHeaders(block.Columns) {
-		headers := make([]string, len(block.Columns))
+		headerRow := TableRow{Cells: make([]TableCell, len(block.Columns))}
 		for i, col := range block.Columns {
 			if col.Header != nil {
-				headers[i] = *col.Header
+				headerRow.Cells[i] = TableCell{Text: *col.Header}
 			}
 		}
-		sb.WriteString(formatColumns(headers, colWidths, colAligns) + "\n")
+		cells, maxLines := wrapRowCells(headerRow, colWidths, colAligns)
+		for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+			sb.WriteString(formatRowLine(cells, colWidths, lineIdx) + "\n")
+		}
 		sb.WriteString(strings.Repeat("-", totalWidth) + "\n")
 	}
 
 	for _, row := range block.Rows {
 		if row.Merge {
-			if len(row.Cells) > 0 {
-				cell := row.Cells[0]
-				align := orDefault(cell.Align, "left")
-				sb.WriteString(formatCol(cell.Text, totalWidth, align) + "\n")
+			if len(row.Cells) == 0 {
+				continue
+			}
+			align := orDefault(row.Cells[0].Align, "left")
+			for _, line := range wrapCellLines(row.Cells[0].Text, totalWidth) {
+				sb.WriteString(formatCol(line, totalWidth, align) + "\n")
 			}
 			continue
 		}
-		var line strings.Builder
-		for i, cell := range row.Cells {
-			if i >= len(colWidths) {
-				break
-			}
-			align := resolveAlign(cell.Align, colAlignAt(colAligns, i))
-			line.WriteString(formatCol(cell.Text, colWidths[i], align))
+		cells, maxLines := wrapRowCells(row, colWidths, colAligns)
+		for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+			sb.WriteString(formatRowLine(cells, colWidths, lineIdx) + "\n")
 		}
-		sb.WriteString(line.String() + "\n")
 	}
+}
+
+// wrapCellLines envuelve text en tantas líneas de hasta width runas como
+// haga falta, partiendo por espacios; una palabra más larga que width se
+// corta a la fuerza para no bloquear el layout. Mismo criterio de word-wrap
+// que ya usa el bloque "text" (ver drawText/PrintWrapped), contado en
+// caracteres para poder compartirlo entre el renderer de texto plano y el
+// motor de imagen (drawTable en render_thermal.go).
+func wrapCellLines(text string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	var lines []string
+	var cur []rune
+	for _, word := range words {
+		wr := []rune(word)
+		for len(wr) > width {
+			if len(cur) > 0 {
+				lines = append(lines, string(cur))
+				cur = nil
+			}
+			lines = append(lines, string(wr[:width]))
+			wr = wr[width:]
+		}
+		switch {
+		case len(cur) == 0:
+			cur = wr
+		case len(cur)+1+len(wr) <= width:
+			cur = append(cur, ' ')
+			cur = append(cur, wr...)
+		default:
+			lines = append(lines, string(cur))
+			cur = wr
+		}
+	}
+	if len(cur) > 0 {
+		lines = append(lines, string(cur))
+	}
+	return lines
+}
+
+// cellWrapWidth devuelve el ancho de wrap disponible en runas para una celda
+// según su tamaño de fuente: "double" ocupa el doble de ancho por carácter
+// en el motor de imagen, así que su límite efectivo de wrap es la mitad del
+// ancho de columna. "medium" solo duplica el alto, no el ancho.
+func cellWrapWidth(colWidth int, size string) int {
+	if size == "double" {
+		w := colWidth / 2
+		if w < 1 {
+			w = 1
+		}
+		return w
+	}
+	return colWidth
+}
+
+// wrappedCell son las líneas ya envueltas de una celda de tabla junto con el
+// estilo efectivo resuelto (align heredado de columna, bold heredado de
+// fila, size), listas para componerse línea por línea.
+type wrappedCell struct {
+	lines []string
+	align string
+	bold  bool
+	size  string
+}
+
+// wrapRowCells resuelve el estilo efectivo de cada celda de una fila y
+// envuelve su texto al ancho de su columna. Devuelve una celda por columna
+// (rellenando con vacío si la fila trae menos celdas que columnas, para que
+// la tabla no pierda su estructura) y el número de líneas que ocupa la fila
+// completa (el máximo entre todas sus celdas envueltas).
+func wrapRowCells(row TableRow, colWidths []int, colAligns []string) ([]wrappedCell, int) {
+	cells := make([]wrappedCell, len(colWidths))
+	maxLines := 1
+	for i := range colWidths {
+		var cell TableCell
+		if i < len(row.Cells) {
+			cell = row.Cells[i]
+		}
+		bold := row.Bold
+		if cell.Bold != nil {
+			bold = *cell.Bold
+		}
+		size := orDefault(cell.Size, "normal")
+		align := resolveAlign(cell.Align, colAlignAt(colAligns, i))
+		lines := wrapCellLines(cell.Text, cellWrapWidth(colWidths[i], size))
+		cells[i] = wrappedCell{lines: lines, align: align, bold: bold, size: size}
+		if len(lines) > maxLines {
+			maxLines = len(lines)
+		}
+	}
+	return cells, maxLines
+}
+
+// formatRowLine compone la línea de texto lineIdx de una fila ya envuelta
+// (wrapRowCells), alineando cada celda dentro de su ancho de columna. Las
+// celdas con menos líneas que el máximo de la fila quedan en blanco a partir
+// de ahí, para que las demás columnas mantengan su posición.
+func formatRowLine(cells []wrappedCell, colWidths []int, lineIdx int) string {
+	var sb strings.Builder
+	for i, c := range cells {
+		line := ""
+		if lineIdx < len(c.lines) {
+			line = c.lines[lineIdx]
+		}
+		sb.WriteString(formatCol(line, colWidths[i], c.align))
+	}
+	return sb.String()
 }
 
 // renderColumnsText renderiza un bloque type:"columns" a texto plano.
@@ -477,18 +593,6 @@ func formatCol(text string, colWidth int, align string) string {
 	default: // "left"
 		return text + strings.Repeat(" ", pad)
 	}
-}
-
-// formatColumns construye la línea de texto para un conjunto de columnas.
-func formatColumns(cols []string, colWidths []int, aligns []string) string {
-	var sb strings.Builder
-	for i, text := range cols {
-		if i >= len(colWidths) {
-			break
-		}
-		sb.WriteString(formatCol(text, colWidths[i], colAlignAt(aligns, i)))
-	}
-	return sb.String()
 }
 
 // resolveAlign devuelve cellAlign si no está vacío, de lo contrario colAlign.

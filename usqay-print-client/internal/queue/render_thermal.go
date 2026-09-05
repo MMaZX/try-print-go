@@ -337,7 +337,7 @@ func drawThermalBlock(eng *ticketimage.Engine, blockType string, raw json.RawMes
 			slog.Warn("skip bloque table inválido", "err", err)
 			return nil
 		}
-		drawTable(eng, block, ctx.widthChars)
+		drawTable(eng, block, ctx)
 		return nil
 
 	case "columns":
@@ -389,19 +389,28 @@ func drawText(eng *ticketimage.Engine, block TextBlock) {
 	}
 }
 
-func drawTable(eng *ticketimage.Engine, block TableBlock, widthChars int) {
+// drawTable dibuja un bloque table sobre el lienzo de imagen. Usa el mismo
+// wrap por celda (wrapRowCells/formatRowLine, en renderer.go) que
+// renderTableText — ambos motores calculan la tabla igual, la única
+// diferencia es que acá sí se aplican negrita/tamaño reales.
+func drawTable(eng *ticketimage.Engine, block TableBlock, ctx thermalCtx) {
+	widthChars := ctx.widthChars
 	colWidths, colAligns := resolveTableLayout(block, widthChars)
+	pxPerChar := float64(ctx.printWidthDots) / float64(widthChars)
 
 	if hasTableHeaders(block.Columns) {
-		headers := make([]string, len(block.Columns))
+		headerRow := TableRow{Cells: make([]TableCell, len(block.Columns))}
 		for i, col := range block.Columns {
 			if col.Header != nil {
-				headers[i] = *col.Header
+				headerRow.Cells[i] = TableCell{Text: *col.Header}
 			}
 		}
+		cells, maxLines := wrapRowCells(headerRow, colWidths, colAligns)
 		eng.AlignLeft()
 		eng.SetBold(true)
-		eng.PrintLine(formatColumns(headers, colWidths, colAligns))
+		for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+			eng.PrintLine(formatRowLine(cells, colWidths, lineIdx))
+		}
 		eng.SetBold(false)
 		eng.PrintLine(strings.Repeat("-", widthChars))
 	}
@@ -411,7 +420,7 @@ func drawTable(eng *ticketimage.Engine, block TableBlock, widthChars int) {
 			drawMergeRow(eng, row, widthChars)
 			continue
 		}
-		drawTableRow(eng, row, colWidths, colAligns)
+		drawTableRow(eng, row, colWidths, colAligns, pxPerChar)
 	}
 }
 
@@ -430,21 +439,28 @@ func drawMergeRow(eng *ticketimage.Engine, row TableRow, totalWidth int) {
 	}
 	w, h := sizeMultipliers(cellSize)
 	eng.SetSize(w, h)
-	eng.PrintLine(formatCol(cell.Text, totalWidth, align))
+	for _, line := range wrapCellLines(cell.Text, cellWrapWidth(totalWidth, cellSize)) {
+		eng.PrintLine(formatCol(line, totalWidth, align))
+	}
 	eng.SetSize(1, 1)
 	if effectiveBold {
 		eng.SetBold(false)
 	}
 }
 
-// drawTableRow imprime una fila normal. Cuando ninguna celda pide negrita o
-// tamaño distinto de la fila, arma la línea completa como un solo string
-// (una sola llamada a PrintLine, que sí resuelve alineación/ancho sola). Si
-// hay mezcla de estilos por celda, va celda por celda con PrintSegmentAt
-// concatenando manualmente en x — PrintLine/Print normales no acumulan
-// sobre una posición anterior (recalculan su propio x según alineación),
-// así que no sirven para eso.
-func drawTableRow(eng *ticketimage.Engine, row TableRow, colWidths []int, colAligns []string) {
+// drawTableRow imprime una fila normal, envolviendo cada celda a su ancho de
+// columna (wrapRowCells) y emitiendo tantas líneas como haga falta. Cuando
+// ninguna celda pide negrita o tamaño distinto de la fila, cada línea sale
+// como un solo string (una llamada a PrintLine, que resuelve alineación/ancho
+// sola). Si hay mezcla de estilos por celda, cada línea va celda por celda
+// con PrintSegmentAt, avanzando x SIEMPRE al límite de columna en píxeles
+// (colWidths[i]*pxPerChar) en vez de usar el x que devuelve PrintSegmentAt —
+// ese x real depende del ancho dibujado, que con size "medium"/"double" no
+// coincide con el ancho de columna en caracteres normales, y quedaba pegado
+// a la celda siguiente. PrintLine/Print normales tampoco sirven para esto:
+// recalculan su propio x según alineación, no acumulan sobre una posición
+// anterior.
+func drawTableRow(eng *ticketimage.Engine, row TableRow, colWidths []int, colAligns []string, pxPerChar float64) {
 	needsPerCell := false
 	for _, cell := range row.Cells {
 		if cell.Bold != nil || (cell.Size != "" && cell.Size != "normal") {
@@ -454,54 +470,53 @@ func drawTableRow(eng *ticketimage.Engine, row TableRow, colWidths []int, colAli
 	}
 
 	eng.AlignLeft()
+	cells, maxLines := wrapRowCells(row, colWidths, colAligns)
 
 	if !needsPerCell {
-		var sb strings.Builder
-		for i, cell := range row.Cells {
-			if i >= len(colWidths) {
-				break
-			}
-			align := resolveAlign(cell.Align, colAlignAt(colAligns, i))
-			sb.WriteString(formatCol(cell.Text, colWidths[i], align))
-		}
 		if row.Bold {
 			eng.SetBold(true)
 		}
-		eng.PrintLine(sb.String())
+		for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+			eng.PrintLine(formatRowLine(cells, colWidths, lineIdx))
+		}
 		if row.Bold {
 			eng.SetBold(false)
 		}
 		return
 	}
 
-	x := 0.0
-	for i, cell := range row.Cells {
-		if i >= len(colWidths) {
-			break
-		}
-		align := resolveAlign(cell.Align, colAlignAt(colAligns, i))
+	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+		x := 0.0
+		for i, c := range cells {
+			line := ""
+			if lineIdx < len(c.lines) {
+				line = c.lines[lineIdx]
+			}
+			eng.SetBold(c.bold)
+			w, h := sizeMultipliers(c.size)
+			eng.SetSize(w, h)
 
-		cellBold := row.Bold
-		if cell.Bold != nil {
-			cellBold = *cell.Bold
+			colEndX := x + float64(colWidths[i])*pxPerChar
+			if c.size != "normal" {
+				eng.PrintSegmentAt(line, x)
+			} else {
+				eng.PrintSegmentAt(formatCol(line, colWidths[i], c.align), x)
+			}
+			eng.SetSize(1, 1)
+			x = colEndX
 		}
-		eng.SetBold(cellBold)
-
-		cellSize := orDefault(cell.Size, "normal")
-		w, h := sizeMultipliers(cellSize)
-		eng.SetSize(w, h)
-
-		// Sin padding en tamaños no estándar: el ancho de columna en
-		// caracteres normales no aplica al doble/medio ancho de fuente.
-		if cellSize != "normal" {
-			x = eng.PrintSegmentAt(cell.Text, x)
-		} else {
-			x = eng.PrintSegmentAt(formatCol(cell.Text, colWidths[i], align), x)
-		}
-		eng.SetSize(1, 1)
+		eng.SetBold(false)
+		// NewLine() usa el tamaño de fuente activo en el momento de llamarla
+		// (ver TextRenderer.NewLine) — acá siempre queda en (1,1) porque cada
+		// celda resetea su tamaño después de dibujarse, así que el salto de
+		// línea es el de una línea normal. No se fuerza a la altura de la
+		// celda más grande de la fila (ej. cantidad en "medium"): esa celda
+		// igual entra sin pisar la línea siguiente porque el glyph agrandado
+		// crece desde la misma base, y forzar el salto a su altura completa
+		// duplica el interlineado real en las filas mixtas (ver bug reportado
+		// tras el primer fix).
+		eng.NewLine()
 	}
-	eng.SetBold(false)
-	eng.NewLine()
 }
 
 func drawColumns(eng *ticketimage.Engine, block ColumnsBlock, widthChars int) {
