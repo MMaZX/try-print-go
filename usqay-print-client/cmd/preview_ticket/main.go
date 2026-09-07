@@ -2,88 +2,190 @@ package main
 
 import (
 	"fmt"
-	"image"
-	_ "image/png"
+	"image/png"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
-	"usqay-print-client/internal/ticketrender"
+	"usqay-print-client/internal/htmlrender"
 )
+
+type BenchmarkResult struct {
+	FileName    string
+	WidthPx     int
+	HeightPx    int
+	FileSizeKB  float64
+	RenderMS    float64
+	DispatchMS  float64
+	TotalMS     float64
+	ESCPOSBytes int
+}
 
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("==================================================")
-		fmt.Println("🎨 PREVISUALIZADOR VISUAL DE TICKETS (USQAY)")
+		fmt.Println("🎨 PREVISUALIZADOR Y BENCHMARK DE TICKETS (USQAY)")
 		fmt.Println("==================================================")
 		fmt.Println("Uso:")
-		fmt.Println("  preview_ticket <ruta_a_payload.json> [salida.png]")
+		fmt.Println("  preview_ticket <ruta_a_payload.json | directorio> [salida.png]")
 		fmt.Println("\nEjemplos:")
-		fmt.Println("  go run ./cmd/preview_ticket dist/test_full_payload.json")
-		fmt.Println("  go run ./cmd/preview_ticket mi_ticket.json ticket_preview.png")
+		fmt.Println("  preview_ticket dist/rest/cola_01.json")
+		fmt.Println("  preview_ticket dist/rest")
+		fmt.Println("  preview_ticket dist/test")
 		fmt.Println("==================================================")
 		os.Exit(1)
 	}
 
-	payloadPath := os.Args[1]
+	targetPath := os.Args[1]
+	fi, err := os.Stat(targetPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error accediendo a %q: %v\n", targetPath, err)
+		os.Exit(1)
+	}
+
+	if fi.IsDir() {
+		processDirectory(targetPath)
+		return
+	}
+
 	outputPath := ""
 	if len(os.Args) >= 3 {
 		outputPath = os.Args[2]
 	} else {
-		// Por defecto: mismo nombre y ruta pero con extensión .png
-		ext := filepath.Ext(payloadPath)
-		base := strings.TrimSuffix(payloadPath, ext)
-		outputPath = base + "_preview.png"
+		ext := filepath.Ext(targetPath)
+		base := strings.TrimSuffix(targetPath, ext)
+		outputPath = base + ".png"
 	}
 
-	raw, err := os.ReadFile(payloadPath)
+	res, err := processSingleFile(targetPath, outputPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error leyendo archivo JSON %q: %v\n", payloadPath, err)
+		fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
 		os.Exit(1)
 	}
 
 	fmt.Println("==================================================")
-	fmt.Println("🎨 RENDERIZANDO PREVIEW A IMAGEN (PNG)...")
-	fmt.Printf("📄 Entrada : %s\n", payloadPath)
-	fmt.Printf("🖼️  Salida  : %s\n", outputPath)
+	fmt.Println("✅ PREVIEW GENERADO EXITOSAMENTE!")
+	fmt.Printf("📄 Entrada          : %s\n", targetPath)
+	fmt.Printf("🖼️  Salida           : %s\n", outputPath)
+	fmt.Printf("📐 Dimensiones      : %d x %d px\n", res.WidthPx, res.HeightPx)
+	fmt.Printf("📦 Tamaño PNG       : %.1f KB\n", res.FileSizeKB)
+	fmt.Printf("⚡ Render PNG       : %.2f ms\n", res.RenderMS)
+	fmt.Printf("🖨️  Despacho ESC/POS : %.2f ms (%d bytes)\n", res.DispatchMS, res.ESCPOSBytes)
+	fmt.Printf("⏱️  Tiempo Total     : %.2f ms\n", res.TotalMS)
 	fmt.Println("==================================================")
+}
 
-	start := time.Now()
-	// prof=nil permite derivar automáticamente el ancho y propiedades del JSON (58mm u 80mm)
-	img, err := ticketrender.RenderPayloadToImage(nil, string(raw))
+func processSingleFile(jsonPath, pngPath string) (*BenchmarkResult, error) {
+	raw, err := os.ReadFile(jsonPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error renderizando ticket: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("leer JSON %q: %w", jsonPath, err)
 	}
 
-	outFile, err := os.Create(outputPath)
+	totalStart := time.Now()
+
+	// 1. Medir Renderizado HTML a Imagen PNG
+	renderStart := time.Now()
+	img, err := htmlrender.RenderPayloadToImage(nil, string(raw))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error creando archivo PNG %q: %v\n", outputPath, err)
-		os.Exit(1)
+		return nil, fmt.Errorf("renderizar a imagen: %w", err)
+	}
+	renderDuration := time.Since(renderStart)
+
+	// Guardar PNG a disco
+	outFile, err := os.Create(pngPath)
+	if err != nil {
+		return nil, fmt.Errorf("crear PNG %q: %w", pngPath, err)
 	}
 	defer outFile.Close()
 
-	if err := ticketrender.RenderPayloadToPNG(nil, string(raw), outFile); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error guardando imagen PNG: %v\n", err)
+	if err := png.Encode(outFile, img); err != nil {
+		return nil, fmt.Errorf("codificar PNG: %w", err)
+	}
+
+	fi, err := outFile.Stat()
+	fileSizeKB := 0.0
+	if err == nil {
+		fileSizeKB = float64(fi.Size()) / 1024.0
+	}
+
+	// 2. Medir Generación de Despacho ESC/POS Raster (GS v 0)
+	dispatchStart := time.Now()
+	escBytes, err := htmlrender.RenderThermal(nil, string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("generar ESC/POS: %w", err)
+	}
+	dispatchDuration := time.Since(dispatchStart)
+
+	totalDuration := time.Since(totalStart)
+	bounds := img.Bounds()
+
+	return &BenchmarkResult{
+		FileName:    filepath.Base(jsonPath),
+		WidthPx:     bounds.Dx(),
+		HeightPx:    bounds.Dy(),
+		FileSizeKB:  fileSizeKB,
+		RenderMS:    float64(renderDuration.Microseconds()) / 1000.0,
+		DispatchMS:  float64(dispatchDuration.Microseconds()) / 1000.0,
+		TotalMS:     float64(totalDuration.Microseconds()) / 1000.0,
+		ESCPOSBytes: len(escBytes),
+	}, nil
+}
+
+func processDirectory(dirPath string) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error leyendo directorio %q: %v\n", dirPath, err)
 		os.Exit(1)
 	}
 
-	duration := time.Since(start)
-	bounds := img.Bounds()
+	var jsonFiles []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
+			jsonFiles = append(jsonFiles, filepath.Join(dirPath, e.Name()))
+		}
+	}
+	sort.Strings(jsonFiles)
 
-	fileInfo, err := outFile.Stat()
-	fileSizeKB := 0.0
-	if err == nil {
-		fileSizeKB = float64(fileInfo.Size()) / 1024.0
+	if len(jsonFiles) == 0 {
+		fmt.Printf("⚠️  No se encontraron archivos .json en %q\n", dirPath)
+		return
 	}
 
-	fmt.Println("✅ PREVIEW GENERADO EXITOSAMENTE!")
-	fmt.Printf("⏱️  Tiempo de renderizado : %.2f ms\n", float64(duration.Microseconds())/1000.0)
-	fmt.Printf("📐 Dimensiones imagen    : %d x %d px\n", bounds.Dx(), bounds.Dy())
-	fmt.Printf("📦 Tamaño del archivo PNG : %.1f KB\n", fileSizeKB)
-	fmt.Printf("🚀 Archivo listo en       : %s\n", outputPath)
-	fmt.Println("==================================================")
+	fmt.Println("=========================================================================================================")
+	fmt.Printf("🎨 PROCESANDO DIRECTORIO: %s (%d comprobantes)\n", dirPath, len(jsonFiles))
+	fmt.Println("=========================================================================================================")
 
-	_ = image.Rect // mantener import limpio
+	var results []*BenchmarkResult
+	var totalRenderMS, totalDispatchMS float64
+
+	for i, jsonPath := range jsonFiles {
+		baseName := strings.TrimSuffix(jsonPath, filepath.Ext(jsonPath))
+		pngPath := baseName + ".png"
+
+		res, err := processSingleFile(jsonPath, pngPath)
+		if err != nil {
+			fmt.Printf("[%02d/%02d] ❌ %s: %v\n", i+1, len(jsonFiles), filepath.Base(jsonPath), err)
+			continue
+		}
+
+		results = append(results, res)
+		totalRenderMS += res.RenderMS
+		totalDispatchMS += res.DispatchMS
+
+		fmt.Printf("[%02d/%02d] ✅ %-28s | %4dx%-4d px | %5.1f KB | Render: %7.2f ms | Despacho: %7.2f ms\n",
+			i+1, len(jsonFiles), res.FileName, res.WidthPx, res.HeightPx, res.FileSizeKB, res.RenderMS, res.DispatchMS)
+	}
+
+	count := float64(len(results))
+	if count > 0 {
+		avgRender := totalRenderMS / count
+		avgDispatch := totalDispatchMS / count
+		fmt.Println("=========================================================================================================")
+		fmt.Printf("📊 RESUMEN BENCHMARK (%d comprobantes procesados)\n", len(results))
+		fmt.Printf("⚡ Promedio Renderizado HTML → PNG   : %.2f ms por ticket\n", avgRender)
+		fmt.Printf("🖨️  Promedio Despacho Total a ESC/POS : %.2f ms por ticket\n", avgDispatch)
+		fmt.Println("=========================================================================================================")
+	}
 }

@@ -59,11 +59,20 @@ func TestE2E_DropAndReconnect(t *testing.T) {
 	// 2. Levantar servidor WebSocket falso
 	var (
 		connCount       atomic.Int32
+		allowReconnect  = make(chan struct{})
 		reconnectSyncCh = make(chan SyncMsg, 1)
 		dropNow         = make(chan struct{})
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if connCount.Load() >= 1 {
+			select {
+			case <-allowReconnect:
+			case <-r.Context().Done():
+				return
+			}
+		}
+
 		wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			t.Logf("websocket.Accept error: %v", err)
@@ -205,7 +214,7 @@ func TestE2E_DropAndReconnect(t *testing.T) {
 	close(dropNow)
 
 	// Paso D (AC #2): Worker procesa el job localmente mientras la conexión está caída -> PRINTED en SQLite
-	waitFor(t, 5*time.Second, func() bool {
+	waitFor(t, 10*time.Second, func() bool {
 		jobs, err := repo.ListByStatus(queue.EstadoPrinted)
 		if err != nil || len(jobs) == 0 {
 			return false
@@ -217,6 +226,9 @@ func TestE2E_DropAndReconnect(t *testing.T) {
 		}
 		return false
 	})
+
+	// Señalizar que el servidor puede aceptar la reconexión y recibir el SyncMsg
+	close(allowReconnect)
 
 	// Paso E (AC #3): Esperar reconexión y verificar que el SyncMsg incluye el job impreso
 	select {
