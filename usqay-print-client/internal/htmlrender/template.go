@@ -52,27 +52,36 @@ type PaperProperties struct {
 	Padding []float64 `json:"padding"` // Márgenes [top, right, bottom, left] en mm
 }
 
-// DefaultScale es el multiplicador aplicado cuando el payload no especifica
-// scale (o lo envía en 0 / negativo): 1.0 = tamaño tipográfico base del CSS.
+// DefaultScale es el valor de scale asumido cuando el payload no especifica
+// scale (o lo envía en 0 / negativo). Es el scale "de cliente", antes de
+// aplicar BaseScaleFactor.
 const DefaultScale = 1.0
+
+// BaseScaleFactor es el multiplicador base aplicado SIEMPRE sobre el scale
+// solicitado en el payload. A 1.0x puro la tipografía sale demasiado chica en
+// las térmicas objetivo, así que el "1.0" del cliente se renderiza en realidad
+// a 1.7x. El cliente pide 1, obtiene 1.7; pide 1.5, obtiene 2.55; etc.
+const BaseScaleFactor = 1.7
 
 // scaleModelVersion identifica el algoritmo de escala vigente. Se imprime en
 // cada ticket durante la calibración física para saber qué modelo produjo el
 // raster. Bump manual en cada iteración del modelo de escala.
 const scaleModelVersion = "dpi-zoom-v1"
 
-// maxScale acota el zoom para evitar rasters desproporcionados que desborden
-// el viewport de captura (ver EmulateViewport en render.go).
-const maxScale = 5.0
+// maxScale acota el zoom EFECTIVO (ya multiplicado por BaseScaleFactor) para
+// evitar rasters desproporcionados. Con BaseScaleFactor 1.7 equivale a un
+// scale de cliente máximo de ~4.7x.
+const maxScale = 8.0
 
-// EffectiveScale devuelve el multiplicador de zoom a aplicar sobre el tamaño
-// tipográfico base. Es un multiplicador puro: <= 0 o ausente equivale a 1.0
-// (sin escalar) y se acota a maxScale por seguridad.
+// EffectiveScale devuelve el multiplicador de zoom real a aplicar: toma el
+// scale solicitado (<= 0 o ausente => DefaultScale), lo multiplica por
+// BaseScaleFactor y acota el resultado a maxScale por seguridad.
 func (p PaperProperties) EffectiveScale() float64 {
 	s := p.Scale
 	if s <= 0 {
-		return DefaultScale
+		s = DefaultScale
 	}
+	s *= BaseScaleFactor
 	if s > maxScale {
 		return maxScale
 	}
@@ -228,6 +237,10 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 	// texto, las columnas y las tablas reflowean dentro del MISMO ancho de papel,
 	// sin recortes. Con scale == 1 no se emite `zoom` y el layout queda byte a
 	// byte igual que antes.
+	requestedScale := payload.PaperProperties.Scale
+	if requestedScale <= 0 {
+		requestedScale = DefaultScale
+	}
 	scale := payload.PaperProperties.EffectiveScale()
 	logicalDivisor := 1.0
 	if scale != DefaultScale {
@@ -235,12 +248,13 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 	}
 	ticketW := int(math.Round(float64(widthDots) / logicalDivisor))
 
-	// Línea de calibración: solo se emite cuando hay una escala distinta de la
-	// base, para identificar qué escala y qué modelo produjeron el raster
-	// durante la calibración física. Con scale == 1 no se emite y el layout
-	// queda byte a byte igual (los golden files dependen de esto).
+	// Línea de calibración: solo se emite cuando el zoom efectivo no es la
+	// identidad, para identificar qué escala (pedida y efectiva) y qué modelo
+	// produjeron el raster durante la calibración física. Con scale efectivo
+	// == 1 no se emite y el layout queda byte a byte igual.
 	if scale != DefaultScale {
-		fmt.Fprintf(&bodyBuf, `<div class="text-block align-left" style="font-size:11px;font-weight:400;">· scale=%s · model=%s ·</div>`+"\n",
+		fmt.Fprintf(&bodyBuf, `<div class="text-block align-left" style="font-size:11px;font-weight:400;">· scale req=%s eff=%s · model=%s ·</div>`+"\n",
+			strconv.FormatFloat(requestedScale, 'f', -1, 64),
 			strconv.FormatFloat(scale, 'f', -1, 64), scaleModelVersion)
 	}
 
