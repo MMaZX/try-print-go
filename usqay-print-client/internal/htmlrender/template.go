@@ -56,6 +56,11 @@ type PaperProperties struct {
 // scale (o lo envía en 0 / negativo): 1.0 = tamaño tipográfico base del CSS.
 const DefaultScale = 1.0
 
+// scaleModelVersion identifica el algoritmo de escala vigente. Se imprime en
+// cada ticket durante la calibración física para saber qué modelo produjo el
+// raster. Bump manual en cada iteración del modelo de escala.
+const scaleModelVersion = "dpi-zoom-v1"
+
 // maxScale acota el zoom para evitar rasters desproporcionados que desborden
 // el viewport de captura (ver EmulateViewport en render.go).
 const maxScale = 5.0
@@ -216,6 +221,29 @@ func BuildHTMLFromJSON(prof *printer.DeviceProfile, payloadJSON string) (string,
 func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 	var bodyBuf bytes.Buffer
 
+	// scale se comporta como un device-pixel-ratio (el "DPI" de una pantalla):
+	// el contenido se maqueta en un lienzo lógico más angosto (widthDots / scale)
+	// y luego `zoom` lo reamplía al ancho físico real en dots. Efecto: la
+	// tipografía y todo el layout crecen scale× en dots reales, mientras que el
+	// texto, las columnas y las tablas reflowean dentro del MISMO ancho de papel,
+	// sin recortes. Con scale == 1 no se emite `zoom` y el layout queda byte a
+	// byte igual que antes.
+	scale := payload.PaperProperties.EffectiveScale()
+	logicalDivisor := 1.0
+	if scale != DefaultScale {
+		logicalDivisor = scale
+	}
+	ticketW := int(math.Round(float64(widthDots) / logicalDivisor))
+
+	// Línea de calibración: solo se emite cuando hay una escala distinta de la
+	// base, para identificar qué escala y qué modelo produjeron el raster
+	// durante la calibración física. Con scale == 1 no se emite y el layout
+	// queda byte a byte igual (los golden files dependen de esto).
+	if scale != DefaultScale {
+		fmt.Fprintf(&bodyBuf, `<div class="text-block align-left" style="font-size:11px;font-weight:400;">· scale=%s · model=%s ·</div>`+"\n",
+			strconv.FormatFloat(scale, 'f', -1, 64), scaleModelVersion)
+	}
+
 	for _, raw := range payload.Body {
 		var env blockEnvelope
 		if err := json.Unmarshal(raw, &env); err != nil {
@@ -251,7 +279,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 		case "image":
 			var b imageBlock
 			if err := json.Unmarshal(raw, &b); err == nil {
-				renderImageHTML(&bodyBuf, b, widthDots)
+				renderImageHTML(&bodyBuf, b, ticketW)
 			}
 		case "qr":
 			var b qrBlock
@@ -266,20 +294,17 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 		}
 	}
 
-	// Conversión de márgenes mm a píxeles (203 DPI = ~8 dots/mm)
-	padTop := int(math.Round(payload.PaperProperties.TopMM() * 8.0))
-	padRight := int(math.Round(payload.PaperProperties.RightMM() * 8.0))
-	padBottom := int(math.Round(payload.PaperProperties.BottomMM() * 8.0))
-	padLeft := int(math.Round(payload.PaperProperties.LeftMM() * 8.0))
+	// Conversión de márgenes mm a píxeles (203 DPI = ~8 dots/mm), expresados en
+	// el lienzo lógico: se dividen por el mismo divisor que el ancho para que,
+	// tras el `zoom`, equivalgan a los milímetros físicos solicitados.
+	padTop := int(math.Round(payload.PaperProperties.TopMM() * 8.0 / logicalDivisor))
+	padRight := int(math.Round(payload.PaperProperties.RightMM() * 8.0 / logicalDivisor))
+	padBottom := int(math.Round(payload.PaperProperties.BottomMM() * 8.0 / logicalDivisor))
+	padLeft := int(math.Round(payload.PaperProperties.LeftMM() * 8.0 / logicalDivisor))
 
-	// scale se aplica como zoom de lienzo sobre el ticket completo (estilo viewport/webview).
-	// El layout se calcula sobre el ancho físico completo en dots para respetar
-	// la estructura de columnas y tablas, y el zoom amplía/reduce el lienzo resultante.
-	scale := payload.PaperProperties.EffectiveScale()
 	scaleRule := ""
 	if scale != DefaultScale {
-		scaleStr := strconv.FormatFloat(scale, 'f', -1, 64)
-		scaleRule = fmt.Sprintf("    zoom: %s;\n", scaleStr)
+		scaleRule = fmt.Sprintf("    zoom: %s;\n", strconv.FormatFloat(scale, 'f', -1, 64))
 	}
 
 	fullHTML := fmt.Sprintf(`<!DOCTYPE html>
@@ -410,7 +435,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 %s
 </div>
 </body>
-</html>`, widthDots, padTop, padRight, padBottom, padLeft, scaleRule, bodyBuf.String())
+</html>`, ticketW, padTop, padRight, padBottom, padLeft, scaleRule, bodyBuf.String())
 
 	return fullHTML, nil
 }
