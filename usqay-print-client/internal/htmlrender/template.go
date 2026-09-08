@@ -8,6 +8,7 @@ import (
 	"html"
 	"image/png"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -64,9 +65,21 @@ const DefaultScale = 1.0
 const BaseScaleFactor = 1.7
 
 // scaleModelVersion identifica el algoritmo de escala vigente. Se imprime en
-// cada ticket durante la calibración física para saber qué modelo produjo el
-// raster. Bump manual en cada iteración del modelo de escala.
+// la línea de calibración (ver scaleDebugEnabled) para saber qué modelo produjo
+// el raster. Bump manual en cada iteración del modelo de escala.
 const scaleModelVersion = "dpi-zoom-v1"
+
+// scaleDebugEnabled activa la línea de calibración de escala sobre el ticket.
+// SOLO para pruebas físicas: se enciende con USQAY_SCALE_DEBUG=1 (o true/yes/on).
+// Por defecto está apagada y el ticket no lleva nada fuera del JSON.
+func scaleDebugEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("USQAY_SCALE_DEBUG"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
 
 // maxScale acota el zoom EFECTIVO (ya multiplicado por BaseScaleFactor) para
 // evitar rasters desproporcionados. Con BaseScaleFactor 1.7 equivale a un
@@ -248,11 +261,11 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 	}
 	ticketW := int(math.Round(float64(widthDots) / logicalDivisor))
 
-	// Línea de calibración: solo se emite cuando el zoom efectivo no es la
-	// identidad, para identificar qué escala (pedida y efectiva) y qué modelo
-	// produjeron el raster durante la calibración física. Con scale efectivo
-	// == 1 no se emite y el layout queda byte a byte igual.
-	if scale != DefaultScale {
+	// Línea de calibración: SOLO para pruebas. Se emite únicamente si
+	// USQAY_SCALE_DEBUG está activo; identifica el scale pedido, el efectivo y
+	// el modelo que produjeron el raster. En producción no sale nada que no
+	// esté en el JSON.
+	if scale != DefaultScale && scaleDebugEnabled() {
 		fmt.Fprintf(&bodyBuf, `<div class="text-block align-left" style="font-size:11px;font-weight:400;">· scale req=%s eff=%s · model=%s ·</div>`+"\n",
 			strconv.FormatFloat(requestedScale, 'f', -1, 64),
 			strconv.FormatFloat(scale, 'f', -1, 64), scaleModelVersion)
