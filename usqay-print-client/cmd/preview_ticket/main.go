@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image/png"
 	"os"
@@ -24,26 +25,83 @@ type BenchmarkResult struct {
 	ESCPOSBytes int
 }
 
+func printUsage() {
+	fmt.Println("==================================================")
+	fmt.Println("🎨 PREVISUALIZADOR Y BENCHMARK DE TICKETS (USQAY)")
+	fmt.Println("==================================================")
+	fmt.Println("Uso:")
+	fmt.Println("  preview_ticket <payload.json | directorio> [salida.png]")
+	fmt.Println("  preview_ticket --path <payload.json> [--live] [--port N] [--png-only]")
+	fmt.Println("\nLa entrada puede ir como argumento posicional o con --path (equivalentes).")
+	fmt.Println("Los flags valen en cualquier orden.")
+	fmt.Println("\nEjemplos:")
+	fmt.Println("  preview_ticket dist/rest/cola_01.json")
+	fmt.Println("  preview_ticket dist/rest")
+	fmt.Println("  preview_ticket --live dist/rest/cola_01.json")
+	fmt.Println("  preview_ticket --live --port 1234 --path dist/rest/cola_01.json")
+	fmt.Println("  preview_ticket --live --png-only dist/rest/cola_01.json")
+	fmt.Println("\nModo --live: observa el .json y refresca la vista al guardar.")
+	fmt.Println("  Sin --png-only sirve un servidor HTTP en 127.0.0.1:<port>")
+	fmt.Println("  (--port 0 elige un puerto libre). Con --png-only solo")
+	fmt.Println("  regenera el .png junto al .json, sin navegador.")
+	fmt.Println("==================================================")
+}
+
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("==================================================")
-		fmt.Println("🎨 PREVISUALIZADOR Y BENCHMARK DE TICKETS (USQAY)")
-		fmt.Println("==================================================")
-		fmt.Println("Uso:")
-		fmt.Println("  preview_ticket <ruta_a_payload.json | directorio> [salida.png]")
-		fmt.Println("\nEjemplos:")
-		fmt.Println("  preview_ticket dist/rest/cola_01.json")
-		fmt.Println("  preview_ticket dist/rest")
-		fmt.Println("  preview_ticket dist/test")
-		fmt.Println("==================================================")
-		os.Exit(1)
+	liveFlag := flag.Bool("live", false, "observa el .json y refresca la vista previa al guardar")
+	portFlag := flag.Int("port", 8080, "puerto HTTP para --live (0 = elegir uno libre automáticamente)")
+	pngOnlyFlag := flag.Bool("png-only", false, "con --live, solo regenera el .png en disco (sin servidor HTTP)")
+	pathFlag := flag.String("path", "", "ruta del payload .json o directorio (equivale al argumento posicional)")
+	flag.Usage = printUsage
+	flag.Parse()
+
+	// flag.Parse se detiene en el primer argumento posicional, así que
+	// "archivo.json --live" dejaría los flags sin leer. Recorremos lo que
+	// quede alternando: si empieza con "-" lo re-parseamos como flags, si no
+	// es un posicional. Así los flags valen en cualquier orden.
+	var positionals []string
+	rest := flag.Args()
+	for len(rest) > 0 {
+		if strings.HasPrefix(rest[0], "-") {
+			if err := flag.CommandLine.Parse(rest); err != nil {
+				os.Exit(2)
+			}
+			rest = flag.CommandLine.Args()
+			continue
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
 	}
 
-	targetPath := os.Args[1]
+	// La entrada puede venir por --path o como primer posicional. --path tiene
+	// prioridad y, si se usa, todos los posicionales quedan para la salida.
+	targetPath := *pathFlag
+	outPositionals := positionals
+	if targetPath == "" {
+		if len(positionals) < 1 {
+			printUsage()
+			os.Exit(1)
+		}
+		targetPath = positionals[0]
+		outPositionals = positionals[1:]
+	}
+
 	fi, err := os.Stat(targetPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error accediendo a %q: %v\n", targetPath, err)
 		os.Exit(1)
+	}
+
+	if *liveFlag {
+		if fi.IsDir() {
+			fmt.Fprintln(os.Stderr, "❌ El modo --live requiere un archivo .json, no un directorio")
+			os.Exit(1)
+		}
+		if err := runLive(targetPath, *portFlag, *pngOnlyFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if fi.IsDir() {
@@ -52,8 +110,8 @@ func main() {
 	}
 
 	outputPath := ""
-	if len(os.Args) >= 3 {
-		outputPath = os.Args[2]
+	if len(outPositionals) >= 1 {
+		outputPath = outPositionals[0]
 	} else {
 		ext := filepath.Ext(targetPath)
 		base := strings.TrimSuffix(targetPath, ext)
