@@ -43,6 +43,8 @@ type PrintOptions struct {
 }
 
 // PaperProperties define la geometría física del papel, escala y márgenes de 4 lados.
+// Scale se parsea para compatibilidad de schema; su aplicación vive en el motor
+// htmlrender (PaperProperties.EffectiveScale), no en el renderer de texto plano.
 type PaperProperties struct {
 	Width   float64   `json:"width"`
 	Scale   float64   `json:"scale"`
@@ -79,18 +81,6 @@ func (p PaperProperties) LeftMM() float64 {
 		return p.Padding[3]
 	}
 	return 0.0
-}
-
-// BaseDefaultScale es la escala estándar por defecto del motor de renderizado (1.4x de la fuente base).
-const BaseDefaultScale = 1.4
-
-// EffectiveScale devuelve el factor de escala global aplicando la base por defecto de 1.4.
-func (p PaperProperties) EffectiveScale() float64 {
-	scale := p.Scale
-	if scale <= 0 {
-		scale = 1.0
-	}
-	return BaseDefaultScale * scale
 }
 
 // blockEnvelope inspecciona el campo type sin deserializar el bloque completo.

@@ -48,8 +48,30 @@ type PrintOptions struct {
 // PaperProperties define las dimensiones físicas en mm y márgenes de 4 lados.
 type PaperProperties struct {
 	Width   float64   `json:"width"`   // Ancho del papel en mm (ej. 58.0, 70.0, 80.0)
-	Scale   float64   `json:"scale"`   // Multiplicador sobre la base visual
+	Scale   float64   `json:"scale"`   // Multiplicador de zoom sobre el tamaño tipográfico base
 	Padding []float64 `json:"padding"` // Márgenes [top, right, bottom, left] en mm
+}
+
+// DefaultScale es el multiplicador aplicado cuando el payload no especifica
+// scale (o lo envía en 0 / negativo): 1.0 = tamaño tipográfico base del CSS.
+const DefaultScale = 1.0
+
+// maxScale acota el zoom para evitar rasters desproporcionados que desborden
+// el viewport de captura (ver EmulateViewport en render.go).
+const maxScale = 5.0
+
+// EffectiveScale devuelve el multiplicador de zoom a aplicar sobre el tamaño
+// tipográfico base. Es un multiplicador puro: <= 0 o ausente equivale a 1.0
+// (sin escalar) y se acota a maxScale por seguridad.
+func (p PaperProperties) EffectiveScale() float64 {
+	s := p.Scale
+	if s <= 0 {
+		return DefaultScale
+	}
+	if s > maxScale {
+		return maxScale
+	}
+	return s
 }
 
 func (p PaperProperties) TopMM() float64 {
@@ -250,6 +272,20 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 	padBottom := int(math.Round(payload.PaperProperties.BottomMM() * 8.0))
 	padLeft := int(math.Round(payload.PaperProperties.LeftMM() * 8.0))
 
+	// scale se aplica como zoom sobre el contenido. #ticket mantiene su ancho
+	// físico en dots y sus márgenes en mm; #ticket-content se contrae a
+	// (100% / scale) y el zoom lo devuelve a 100% del área útil, de modo que
+	// solo cambia el tamaño tipográfico efectivo (menos caracteres por línea)
+	// sin alterar el ancho del raster ni el corte. Con scale == 1 no se emite
+	// ni la regla ni el wrapper: el layout queda byte a byte igual que sin scale.
+	scale := payload.PaperProperties.EffectiveScale()
+	scaleRule, contentOpen, contentClose := "", "", ""
+	if scale != DefaultScale {
+		scaleStr := strconv.FormatFloat(scale, 'f', -1, 64)
+		scaleRule = fmt.Sprintf("  #ticket-content {\n    zoom: %s;\n    width: calc(100%% / %s);\n  }\n", scaleStr, scaleStr)
+		contentOpen, contentClose = `<div id="ticket-content">`+"\n", "\n</div>"
+	}
+
 	fullHTML := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -285,7 +321,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
     background-color: #ffffff;
     overflow-wrap: anywhere;
   }
-  .align-left { text-align: left; }
+%s  .align-left { text-align: left; }
   .align-center { text-align: center; }
   .align-right { text-align: right; }
   .bold { font-weight: 800; }
@@ -371,10 +407,10 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 </head>
 <body>
 <div id="ticket">
-%s
+%s%s%s
 </div>
 </body>
-</html>`, widthDots, padTop, padRight, padBottom, padLeft, bodyBuf.String())
+</html>`, widthDots, padTop, padRight, padBottom, padLeft, scaleRule, contentOpen, bodyBuf.String(), contentClose)
 
 	return fullHTML, nil
 }
