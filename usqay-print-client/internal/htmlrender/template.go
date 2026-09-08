@@ -272,18 +272,14 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 	padBottom := int(math.Round(payload.PaperProperties.BottomMM() * 8.0))
 	padLeft := int(math.Round(payload.PaperProperties.LeftMM() * 8.0))
 
-	// scale se aplica como zoom sobre el contenido. #ticket mantiene su ancho
-	// físico en dots y sus márgenes en mm; #ticket-content se contrae a
-	// (100% / scale) y el zoom lo devuelve a 100% del área útil, de modo que
-	// solo cambia el tamaño tipográfico efectivo (menos caracteres por línea)
-	// sin alterar el ancho del raster ni el corte. Con scale == 1 no se emite
-	// ni la regla ni el wrapper: el layout queda byte a byte igual que sin scale.
+	// scale se aplica como zoom de lienzo sobre el ticket completo (estilo viewport/webview).
+	// El layout se calcula sobre el ancho físico completo en dots para respetar
+	// la estructura de columnas y tablas, y el zoom amplía/reduce el lienzo resultante.
 	scale := payload.PaperProperties.EffectiveScale()
-	scaleRule, contentOpen, contentClose := "", "", ""
+	scaleRule := ""
 	if scale != DefaultScale {
 		scaleStr := strconv.FormatFloat(scale, 'f', -1, 64)
-		scaleRule = fmt.Sprintf("  #ticket-content {\n    zoom: %s;\n    width: calc(100%% / %s);\n  }\n", scaleStr, scaleStr)
-		contentOpen, contentClose = `<div id="ticket-content">`+"\n", "\n</div>"
+		scaleRule = fmt.Sprintf("    zoom: %s;\n", scaleStr)
 	}
 
 	fullHTML := fmt.Sprintf(`<!DOCTYPE html>
@@ -319,9 +315,10 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
     width: %dpx;
     padding: %dpx %dpx %dpx %dpx;
     background-color: #ffffff;
-    overflow-wrap: anywhere;
-  }
-%s  .align-left { text-align: left; }
+    overflow-wrap: break-word;
+    word-break: normal;
+%s  }
+  .align-left { text-align: left; }
   .align-center { text-align: center; }
   .align-right { text-align: right; }
   .bold { font-weight: 800; }
@@ -330,7 +327,8 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
   .size-double { font-size: 28px; line-height: 1.2; font-weight: 900; }
 
   .text-block {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
     white-space: pre-wrap;
     margin-bottom: 2px;
   }
@@ -359,7 +357,8 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
   }
   .column-cell {
     min-width: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
     white-space: pre-wrap;
   }
 
@@ -372,7 +371,8 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
   table.ticket-table th, table.ticket-table td {
     vertical-align: top;
     padding: 1px 1px;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
     white-space: pre-wrap;
   }
 
@@ -407,10 +407,10 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 </head>
 <body>
 <div id="ticket">
-%s%s%s
+%s
 </div>
 </body>
-</html>`, widthDots, padTop, padRight, padBottom, padLeft, scaleRule, contentOpen, bodyBuf.String(), contentClose)
+</html>`, widthDots, padTop, padRight, padBottom, padLeft, scaleRule, bodyBuf.String())
 
 	return fullHTML, nil
 }
