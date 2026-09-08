@@ -3,13 +3,13 @@ package htmlrender
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"image"
 	"image/png"
 	"io"
 	"math"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/adcondev/poster/pkg/commands/bitimage"
@@ -23,18 +23,55 @@ import (
 	"usqay-print-client/internal/printer"
 )
 
-const defaultRenderTimeout = 5 * time.Second
+const defaultRenderTimeout = 10 * time.Second
 
-type memoryConnector struct {
-	buf bytes.Buffer
+// Engine gestiona un proceso persistente de Chromium en segundo plano
+// para evitar la sobrecarga de arranque (cold start) en cada ticket.
+type Engine struct {
+	mu            sync.Mutex
+	allocCtx      context.Context
+	allocCancel   context.CancelFunc
+	browserCtx    context.Context
+	browserCancel context.CancelFunc
 }
 
-func (m *memoryConnector) Write(p []byte) (n int, err error) { return m.buf.Write(p) }
-func (m *memoryConnector) Read(p []byte) (n int, err error)  { return m.buf.Read(p) }
-func (m *memoryConnector) Close() error                      { return nil }
+var (
+	globalEngine *Engine
+	engineMu     sync.Mutex
+)
 
-// RenderHTMLToPNG renderiza un string HTML con CSS a una imagen PNG en memoria usando chromedp.
-func RenderHTMLToPNG(ctx context.Context, htmlContent string, widthDots int) ([]byte, error) {
+// GetDefaultEngine obtiene o inicializa la instancia singleton del motor de renderizado.
+func GetDefaultEngine() (*Engine, error) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalEngine != nil && globalEngine.isHealthy() {
+		return globalEngine, nil
+	}
+
+	if globalEngine != nil {
+		globalEngine.Close()
+	}
+
+	eng, err := newEngine()
+	if err != nil {
+		return nil, err
+	}
+	globalEngine = eng
+	return globalEngine, nil
+}
+
+// CloseDefaultEngine detiene la instancia persistente del navegador.
+func CloseDefaultEngine() {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalEngine != nil {
+		globalEngine.Close()
+		globalEngine = nil
+	}
+}
+
+func newEngine() (*Engine, error) {
 	browserPath, err := FindBrowserExecutable()
 	if err != nil {
 		return nil, fmt.Errorf("localizar navegador: %w", err)
@@ -43,46 +80,113 @@ func RenderHTMLToPNG(ctx context.Context, htmlContent string, widthDots int) ([]
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(browserPath),
 		chromedp.Flag("headless", "new"),
+		chromedp.Flag("disable-javascript", true), // Sin JS: máxima velocidad y menor consumo
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-background-networking", true),
+		chromedp.Flag("disable-sync", true),
+		chromedp.Flag("disable-translate", true),
+		chromedp.Flag("mute-audio", true),
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("no-default-browser-check", true),
+		chromedp.Flag("disable-component-update", true),
+		chromedp.Flag("disable-default-apps", true),
 		chromedp.Flag("disable-extensions", true),
 		chromedp.Flag("disable-software-rasterizer", true),
 		chromedp.Flag("hide-scrollbars", true),
-		chromedp.Flag("window-size", fmt.Sprintf("%d,%d", widthDots, 1000)),
+		chromedp.Flag("blink-settings", "imagesEnabled=true"),
 	)
 
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
-	defer cancelAlloc()
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
 
-	taskCtx, cancelTask := chromedp.NewContext(allocCtx)
-	defer cancelTask()
-
-	if _, hasDeadline := taskCtx.Deadline(); !hasDeadline {
-		var cancelTimeout context.CancelFunc
-		taskCtx, cancelTimeout = context.WithTimeout(taskCtx, defaultRenderTimeout)
-		defer cancelTimeout()
+	// Calentar el proceso inicial
+	if err := chromedp.Run(browserCtx); err != nil {
+		browserCancel()
+		allocCancel()
+		return nil, fmt.Errorf("inicializar proceso Chromium persistente: %w", err)
 	}
 
-	dataURI := "data:text/html;base64," + base64.StdEncoding.EncodeToString([]byte(htmlContent))
+	return &Engine{
+		allocCtx:      allocCtx,
+		allocCancel:   allocCancel,
+		browserCtx:    browserCtx,
+		browserCancel: browserCancel,
+	}, nil
+}
+
+func (e *Engine) isHealthy() bool {
+	if e.browserCtx == nil || e.allocCtx == nil {
+		return false
+	}
+	select {
+	case <-e.browserCtx.Done():
+		return false
+	case <-e.allocCtx.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+func (e *Engine) Close() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.browserCancel != nil {
+		e.browserCancel()
+	}
+	if e.allocCancel != nil {
+		e.allocCancel()
+	}
+}
+
+// RenderHTMLToPNG renderiza un string HTML con CSS a una imagen PNG usando una pestaña limpia del navegador persistente.
+func (e *Engine) RenderHTMLToPNG(ctx context.Context, htmlContent string, widthDots int) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	tabCtx, tabCancel := chromedp.NewContext(e.browserCtx)
+	defer tabCancel()
+
+	timeoutCtx, cancelTimeout := context.WithTimeout(tabCtx, defaultRenderTimeout)
+	defer cancelTimeout()
+
+	// Servir el HTML desde el loopback local en lugar de una URL data:. Así el
+	// documento y la fuente (/assets/font.ttf) comparten origen y Chromium no
+	// bloquea la carga de la fuente por CORS / Private Network Access.
+	srv, err := getAssetServer()
+	if err != nil {
+		return nil, err
+	}
+	pageURL, token := srv.publish(htmlContent)
+	defer srv.unpublish(token)
 
 	var buf []byte
-	err = chromedp.Run(taskCtx,
-		chromedp.Navigate(dataURI),
+	err = chromedp.Run(timeoutCtx,
+		// Alto de viewport amplio: los tickets crecen verticalmente sin límite conocido y
+		// EmulateViewport fija deviceScaleFactor=1. La captura de #ticket usa
+		// captureBeyondViewport, pero un viewport generoso evita cualquier recorte vertical.
+		chromedp.EmulateViewport(int64(widthDots), 20000),
+		chromedp.Navigate(pageURL),
 		chromedp.WaitVisible("#ticket", chromedp.ByID),
 		chromedp.Screenshot("#ticket", &buf, chromedp.NodeVisible, chromedp.ByID),
 	)
 	if err != nil {
-		// Fallback a FullScreenshot si el selector de nodo falla
-		fallbackErr := chromedp.Run(taskCtx,
-			chromedp.Navigate(dataURI),
-			chromedp.FullScreenshot(&buf, 100),
-		)
-		if fallbackErr != nil {
-			return nil, fmt.Errorf("captura chromedp: %w (fallback: %v)", err, fallbackErr)
-		}
+		return nil, fmt.Errorf("captura en pestaña chromedp: %w", err)
 	}
 
 	return buf, nil
+}
+
+// Funciones a nivel de paquete para compatibilidad directa:
+
+// RenderHTMLToPNG renderiza un string HTML con CSS a una imagen PNG en memoria.
+func RenderHTMLToPNG(ctx context.Context, htmlContent string, widthDots int) ([]byte, error) {
+	eng, err := GetDefaultEngine()
+	if err != nil {
+		return nil, err
+	}
+	return eng.RenderHTMLToPNG(ctx, htmlContent, widthDots)
 }
 
 // RenderHTMLToImage renderiza un string HTML a un objeto image.Image en memoria.
@@ -98,8 +202,7 @@ func RenderHTMLToImage(ctx context.Context, htmlContent string, widthDots int) (
 	return img, nil
 }
 
-// RenderPayloadToImage convierte un PrintPayload JSON en image.Image en memoria
-// delegando en el generador de plantillas HTML y chromedp.
+// RenderPayloadToImage convierte un PrintPayload JSON en image.Image en memoria.
 func RenderPayloadToImage(prof *printer.DeviceProfile, payloadJSON string) (image.Image, error) {
 	htmlContent, widthDots, _, err := BuildHTMLFromJSON(prof, payloadJSON)
 	if err != nil {
@@ -150,6 +253,11 @@ func RenderThermal(prof *printer.DeviceProfile, payloadJSON string) ([]byte, err
 		return nil, fmt.Errorf("renderizar ticket a imagen: %w", err)
 	}
 
+	return ConvertImageToESC(activeProf, payload, img)
+}
+
+// ConvertImageToESC convierte un image.Image ya renderizado a comandos ESC/POS sin invocar nuevamente a Chromium.
+func ConvertImageToESC(activeProf printer.DeviceProfile, payload *PrintPayload, img image.Image) ([]byte, error) {
 	conn := &memoryConnector{}
 	proto := composer.NewEscpos()
 	posterProfile := &profile.Escpos{
@@ -244,6 +352,14 @@ func RenderThermal(prof *printer.DeviceProfile, payloadJSON string) ([]byte, err
 
 	return conn.buf.Bytes(), nil
 }
+
+type memoryConnector struct {
+	buf bytes.Buffer
+}
+
+func (m *memoryConnector) Write(p []byte) (n int, err error) { return m.buf.Write(p) }
+func (m *memoryConnector) Read(p []byte) (n int, err error)  { return m.buf.Read(p) }
+func (m *memoryConnector) Close() error                      { return nil }
 
 func writeRasterChunked(svc *service.Printer, proto *composer.EscposProtocol, bmp *graphics.MonochromeBitmap) error {
 	rowBytes := bmp.GetWidthBytes()

@@ -255,6 +255,13 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
 <head>
 <meta charset="UTF-8">
 <style>
+  @font-face {
+    font-family: 'CaskaydiaCove';
+    src: url('/assets/font.ttf') format('truetype');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: block;
+  }
   * {
     box-sizing: border-box;
     margin: 0;
@@ -267,7 +274,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
     padding: 0;
     background-color: #ffffff;
     color: #000000;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Roboto, sans-serif;
+    font-family: 'CaskaydiaCove', 'Cascadia Code', 'Cascadia Mono', Consolas, monospace;
     font-size: 15px;
     line-height: 1.25;
     font-weight: 600;
@@ -276,7 +283,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
     width: %dpx;
     padding: %dpx %dpx %dpx %dpx;
     background-color: #ffffff;
-    overflow: hidden;
+    overflow-wrap: anywhere;
   }
   .align-left { text-align: left; }
   .align-center { text-align: center; }
@@ -287,7 +294,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
   .size-double { font-size: 28px; line-height: 1.2; font-weight: 900; }
 
   .text-block {
-    word-break: break-word;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
     margin-bottom: 2px;
   }
@@ -315,7 +322,8 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
     align-items: flex-start;
   }
   .column-cell {
-    word-break: break-word;
+    min-width: 0;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
   }
 
@@ -328,7 +336,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
   table.ticket-table th, table.ticket-table td {
     vertical-align: top;
     padding: 1px 1px;
-    word-break: break-word;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
   }
 
@@ -350,7 +358,7 @@ func BuildHTML(payload *PrintPayload, widthDots int) (string, error) {
   .qr-container.align-right, .barcode-container.align-right { align-items: flex-end; }
   
   .barcode-hri {
-    font-family: monospace;
+    font-family: 'CaskaydiaCove', 'Cascadia Code', monospace;
     font-size: 13px;
     font-weight: 700;
     margin-top: 2px;

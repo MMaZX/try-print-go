@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"usqay-print-client/internal/htmlrender"
+	"usqay-print-client/internal/printer"
 )
 
 type BenchmarkResult struct {
@@ -85,7 +86,7 @@ func processSingleFile(jsonPath, pngPath string) (*BenchmarkResult, error) {
 
 	totalStart := time.Now()
 
-	// 1. Medir Renderizado HTML a Imagen PNG
+	// 1. Medir Renderizado HTML a Imagen PNG en memoria
 	renderStart := time.Now()
 	img, err := htmlrender.RenderPayloadToImage(nil, string(raw))
 	if err != nil {
@@ -110,9 +111,16 @@ func processSingleFile(jsonPath, pngPath string) (*BenchmarkResult, error) {
 		fileSizeKB = float64(fi.Size()) / 1024.0
 	}
 
-	// 2. Medir Generación de Despacho ESC/POS Raster (GS v 0)
+	// 2. Medir Generación de Despacho ESC/POS Raster (GS v 0) a partir de la imagen ya en RAM
 	dispatchStart := time.Now()
-	escBytes, err := htmlrender.RenderThermal(nil, string(raw))
+	_, _, payload, _ := htmlrender.BuildHTMLFromJSON(nil, string(raw))
+	var activeProf printer.DeviceProfile
+	if payload != nil && payload.PaperProperties.Width > 0 {
+		activeProf = printer.DeriveProfileFromWidth(payload.PaperProperties.Width)
+	} else {
+		activeProf = printer.Default58mmProfile()
+	}
+	escBytes, err := htmlrender.ConvertImageToESC(activeProf, payload, img)
 	if err != nil {
 		return nil, fmt.Errorf("generar ESC/POS: %w", err)
 	}
