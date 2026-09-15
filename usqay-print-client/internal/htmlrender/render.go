@@ -7,8 +7,11 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"log/slog"
 	"math"
 	"os"
+	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -25,6 +28,17 @@ import (
 
 const defaultRenderTimeout = 10 * time.Second
 
+// maxEngineAge y maxEngineJobs fuerzan el reciclado del motor persistente
+// incluso si nunca reporta estar "unhealthy": es un cinturón de seguridad
+// adicional al Job Object de Windows (jobobject_windows.go) contra la
+// degradación de Chromium en sesiones muy largas (fugas de memoria propias
+// del navegador, handles acumulados, etc. no relacionados con procesos
+// huérfanos).
+const (
+	maxEngineAge  = 6 * time.Hour
+	maxEngineJobs = 500
+)
+
 // Engine gestiona un proceso persistente de Chromium en segundo plano
 // para evitar la sobrecarga de arranque (cold start) en cada ticket.
 type Engine struct {
@@ -33,6 +47,14 @@ type Engine struct {
 	allocCancel   context.CancelFunc
 	browserCtx    context.Context
 	browserCancel context.CancelFunc
+	createdAt     time.Time
+	jobsHandled   int
+
+	// jobHandle es el handle de Windows al Job Object que agrupa a Chromium y
+	// sus procesos hijos (0 en Linux, o si la asignacion fallo/no dio tiempo).
+	// uintptr en vez de windows.Handle para que este archivo compile en toda
+	// plataforma; el cierre real vive en jobobject_windows.go.
+	jobHandle uintptr
 }
 
 var (
@@ -97,6 +119,21 @@ func newEngine() (*Engine, error) {
 		chromedp.Flag("blink-settings", "imagesEnabled=true"),
 	)
 
+	// Solo en Windows: agrupa Chromium y todos sus procesos hijos (renderer,
+	// GPU, utility) en un Job Object para que mueran juntos pase lo que pase
+	// con el proceso principal. Ver jobobject_windows.go para el porqué.
+	// jobHandleCh recibe el handle resultante (0 si falla) para que Close()
+	// pueda cerrarlo explícitamente en cada reciclado del motor — si no, un
+	// proceso hijo que sobreviva a un reciclado solo moriría cuando el
+	// binario completo se cierre, no en cada recreación del Engine.
+	var jobHandleCh chan uintptr
+	if runtime.GOOS == "windows" {
+		jobHandleCh = make(chan uintptr, 1)
+		opts = append(opts, chromedp.ModifyCmdFunc(func(cmd *exec.Cmd) {
+			attachToJobObject(cmd, jobHandleCh)
+		}))
+	}
+
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
 
@@ -107,12 +144,22 @@ func newEngine() (*Engine, error) {
 		return nil, fmt.Errorf("inicializar proceso Chromium persistente: %w", err)
 	}
 
-	return &Engine{
+	eng := &Engine{
 		allocCtx:      allocCtx,
 		allocCancel:   allocCancel,
 		browserCtx:    browserCtx,
 		browserCancel: browserCancel,
-	}, nil
+		createdAt:     time.Now(),
+	}
+	if jobHandleCh != nil {
+		select {
+		case h := <-jobHandleCh:
+			eng.jobHandle = h
+		case <-time.After(1500 * time.Millisecond):
+			slog.Warn("timeout esperando asignacion de Chromium al Job Object de Windows", "src", "CHROMIUM")
+		}
+	}
+	return eng, nil
 }
 
 func (e *Engine) isHealthy() bool {
@@ -125,8 +172,18 @@ func (e *Engine) isHealthy() bool {
 	case <-e.allocCtx.Done():
 		return false
 	default:
-		return true
 	}
+
+	e.mu.Lock()
+	age := time.Since(e.createdAt)
+	jobs := e.jobsHandled
+	e.mu.Unlock()
+	if age >= maxEngineAge || jobs >= maxEngineJobs {
+		slog.Info("reciclando motor Chromium persistente (limite de edad/tickets alcanzado)",
+			"edad", age, "tickets_procesados", jobs, "src", "CHROMIUM")
+		return false
+	}
+	return true
 }
 
 func (e *Engine) Close() {
@@ -138,12 +195,19 @@ func (e *Engine) Close() {
 	if e.allocCancel != nil {
 		e.allocCancel()
 	}
+	// Cierra el Job Object de esta generación de Chromium: si algún proceso
+	// hijo (renderer/GPU) sobrevivió a los cancel de arriba, muere aquí.
+	// Sin esto, un huérfano de un reciclado solo moriría al cerrar todo el
+	// binario.
+	closeJobHandle(e.jobHandle)
+	e.jobHandle = 0
 }
 
 // RenderHTMLToPNG renderiza un string HTML con CSS a una imagen PNG usando una pestaña limpia del navegador persistente.
 func (e *Engine) RenderHTMLToPNG(ctx context.Context, htmlContent string, widthDots int) ([]byte, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.jobsHandled++
 
 	tabCtx, tabCancel := chromedp.NewContext(e.browserCtx)
 	defer tabCancel()

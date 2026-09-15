@@ -38,6 +38,14 @@ type ConnectionStatus struct {
 	LastError          string
 	LastConnectedAt    time.Time
 	LastDisconnectedAt time.Time
+
+	// Attempts cuenta los intentos de conexion de la racha actual: sube en
+	// cada intento (Run), se reinicia a 0 al conectar. EverConnected queda en
+	// true para siempre tras la primera conexion exitosa del proceso — sirve
+	// para distinguir "todavia arrancando" (ventana de conexion inicial) de
+	// "se cayo despues de andar bien" (ventana de reconexion).
+	Attempts      int
+	EverConnected bool
 }
 
 // Connection manages the WebSocket connection to the print server, including
@@ -106,12 +114,21 @@ func (c *Connection) setConnected(connected bool, errMsg string) {
 	if connected {
 		c.status.LastConnectedAt = time.Now()
 		c.status.LastError = ""
+		c.status.EverConnected = true
+		c.status.Attempts = 0
 		return
 	}
 	c.status.LastDisconnectedAt = time.Now()
 	if errMsg != "" {
 		c.status.LastError = errMsg
 	}
+}
+
+// incrementAttempt registra el inicio de un nuevo intento de conexion.
+func (c *Connection) incrementAttempt() {
+	c.statusMu.Lock()
+	c.status.Attempts++
+	c.statusMu.Unlock()
 }
 
 func (c *Connection) setStatusTerminalID(id string) {
@@ -127,6 +144,7 @@ func (c *Connection) setStatusTerminalID(id string) {
 func (c *Connection) Run(ctx context.Context) {
 	delay := time.Second
 	for ctx.Err() == nil {
+		c.incrementAttempt()
 		if err := c.connectAndServe(ctx); err != nil && ctx.Err() == nil {
 			c.setConnected(false, err.Error())
 			slog.Warn("WebSocket desconectado, reintentando",

@@ -11,11 +11,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"usqay-print-client/internal/autostart"
@@ -24,22 +22,31 @@ import (
 	"usqay-print-client/internal/logging"
 	"usqay-print-client/internal/printer"
 	"usqay-print-client/internal/queue"
+	"usqay-print-client/internal/statuswindow"
 	"usqay-print-client/internal/tray"
 	"usqay-print-client/internal/ui"
 	"usqay-print-client/internal/winconsole"
 	"usqay-print-client/internal/ws"
 )
 
-const AppVersion = "2026.1.0"
+const AppVersion = "2026.1.2"
 
 func main() {
 	listFlag := flag.Bool("list", false, "listar impresoras disponibles y salir")
 	insertFlag := flag.Bool("insert", false, "insertar un trabajo de prueba en la cola y salir")
 	headlessFlag := flag.Bool("headless", false, "ejecutar sin bandeja del sistema (Windows); en Linux siempre es headless")
+	terminalFlag := flag.Bool("terminal", false, "alias de -headless pensado para testing/depuracion manual en una terminal (logs a stdout, sin tray ni ventanas)")
 	installerFlag := flag.Bool("installer", false, "registrar inicio automatico (Task Scheduler / autostart) y salir")
 	uninstallFlag := flag.Bool("uninstaller", false, "remover inicio automatico y salir")
 	versionFlag := flag.Bool("version", false, "mostrar version y salir")
 	flag.Parse()
+
+	// -terminal es -headless con otro nombre, mas claro para quien quiere
+	// correr el agente a mano en una terminal y ver los logs en vivo. No hay
+	// forma de mostrar la consola de proceso desde el tray (se saco esa
+	// opcion: cerrar esa ventana con la X mataba todo el proceso) — este es
+	// el reemplazo soportado para ese caso de uso.
+	headless := *headlessFlag || *terminalFlag
 
 	if *versionFlag {
 		fmt.Printf("usqay-print-client - Version %s\n", AppVersion)
@@ -78,7 +85,7 @@ func main() {
 	// consola, ya termino): nada mas que escribir/leer por consola de aqui
 	// en adelante, asi que en Windows se oculta la ventana de consola para
 	// que ejecutar via Task Scheduler no deje un cmd.exe negro visible.
-	if !*headlessFlag {
+	if !headless {
 		winconsole.Hide()
 	}
 
@@ -164,7 +171,7 @@ func main() {
 
 	// --- Tray: creado antes de arrancar el worker, que puede notificar un
 	// fallo de impresion de inmediato ---
-	t := tray.NewTray(*headlessFlag)
+	t := tray.NewTray(headless)
 
 	// --- Worker con callback de notificación al servidor + tray ---
 	prnDir := filepath.Join(resolveExeDir(), "captured_prns")
@@ -186,18 +193,18 @@ func main() {
 	go worker.Run(ctx)
 	go localSrv.Run(ctx)
 
-	// windowsTray.Run() (below) only pumps its own GUI message loop — it does
-	// not install any OS signal handler. Without one, closing the console
-	// window the user just showed via "Mostrar consola de proceso" delivers
-	// a Windows console-close event that Go turns into an unhandled SIGTERM,
-	// which kills the whole process (tray included) instead of just closing
-	// that window. Watch for it here and just hide the console again; the
-	// agent keeps running in the tray, and "Salir" remains the only real
-	// exit path. Only needed for the real GUI tray on Windows: --headless
-	// and the non-Windows fallback already install their own signal
-	// handling for a real shutdown.
-	if runtime.GOOS == "windows" && !*headlessFlag {
-		go watchConsoleClose()
+	// --- Ventanas de estado de conexion: solo tiene sentido con el tray
+	// grafico real en Windows. En --headless/--terminal no hay ventanas de
+	// ningun tipo (uso pensado para testing por consola). ---
+	if runtime.GOOS == "windows" && !headless {
+		if !waitForInitialConnection(ctx, conn) {
+			slog.Error("no se pudo conectar al servidor de impresion tras los intentos iniciales, cerrando")
+			cancel()
+			time.Sleep(300 * time.Millisecond)
+			os.Exit(1)
+		}
+		showConnectionStatus(cfg, conn)
+		go watchReconnects(ctx, conn)
 	}
 
 	err = t.Run(tray.Callbacks{
@@ -205,9 +212,6 @@ func main() {
 		OnReload:     func() { reloadConfig(cancel) },
 		OnToggleAutostart: func() {
 			toggleAutostart()
-		},
-		OnToggleConsole: func() {
-			winconsole.Toggle()
 		},
 		OnExit: func() {
 			slog.Info("apagando...", "src", "TRAY")
@@ -221,19 +225,85 @@ func main() {
 	time.Sleep(600 * time.Millisecond) // drain in-flight messages
 }
 
-// watchConsoleClose intercepta Ctrl+C y el evento de cierre de la ventana de
-// consola (el "x"), que Windows traduce a la misma señal de terminacion.
-// Aqui eso solo oculta la consola de nuevo — el agente sigue vivo en la
-// bandeja, y "Salir" del menu del tray sigue siendo la unica forma real de
-// apagarlo. Solo se usa mientras corre el tray grafico real en Windows (ver
-// llamador); en modo headless o Linux, Ctrl+C/SIGTERM sí deben cerrar todo,
-// y esos modos ya instalan su propio manejo de señales en internal/tray.
-func watchConsoleClose() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	for range sigChan {
-		slog.Info("consola cerrada: se oculta, el agente sigue activo en la bandeja (usa \"Salir\" del tray para apagarlo)", "src", "TRAY")
-		winconsole.Hide()
+// waitForInitialConnection muestra una ventana "intentando conectar..." no
+// cerrable por el usuario mientras el agente hace sus primeros intentos de
+// conexion, actualizando el contador en vivo. Devuelve true apenas conecta;
+// devuelve false (mostrando antes un dialogo de error) si el tercer intento
+// termina y todavia no hay conexion.
+//
+// Se espera a que Attempts supere maxAttempts, no a que lo alcance, para
+// estar seguros de que ese ultimo intento ya termino y fallo — no que sigue
+// en curso (ws.Connection.incrementAttempt cuenta intentos que arrancan, no
+// que terminan).
+func waitForInitialConnection(ctx context.Context, conn *ws.Connection) bool {
+	const maxAttempts = 3
+
+	win := statuswindow.Show("Usqay Print Client",
+		fmt.Sprintf("Intentando conectar al servidor de impresion...\n\nIntento 1 de %d", maxAttempts))
+	defer win.Close()
+
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			st := conn.Status()
+			if st.Connected {
+				return true
+			}
+
+			shown := st.Attempts
+			if shown < 1 {
+				shown = 1
+			} else if shown > maxAttempts {
+				shown = maxAttempts
+			}
+			win.SetText(fmt.Sprintf("Intentando conectar al servidor de impresion...\n\nIntento %d de %d", shown, maxAttempts))
+
+			if st.Attempts > maxAttempts {
+				win.Close()
+				ui.ShowError("Usqay Print Client - Error de Conexion",
+					fmt.Sprintf("No se pudo conectar al servidor de impresion tras %d intentos.\n\nServidor: %s\nUltimo error: %s",
+						maxAttempts, st.ServerURL, st.LastError))
+				return false
+			}
+		}
+	}
+}
+
+// watchReconnects vigila caidas de conexion una vez que el agente ya conecto
+// exitosamente al menos una vez (a diferencia de waitForInitialConnection,
+// que solo cubre el arranque). Mientras dura la caida muestra una ventana
+// "reconectando..." no cerrable por el usuario, actualizada con el contador
+// de intentos; se cierra sola al reconectar, o junto con el proceso si el
+// binario se cierra (ctx.Done).
+func watchReconnects(ctx context.Context, conn *ws.Connection) {
+	var win *statuswindow.Window
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			win.Close()
+			return
+		case <-ticker.C:
+			st := conn.Status()
+			if st.Connected {
+				win.Close()
+				win = nil
+				continue
+			}
+
+			text := fmt.Sprintf("Conexion perdida. Intentando reconectar...\n\nIntento %d", st.Attempts)
+			if win == nil {
+				win = statuswindow.Show("Usqay Print Client", text)
+			} else {
+				win.SetText(text)
+			}
+		}
 	}
 }
 
@@ -320,6 +390,13 @@ func maskToken(token string) string {
 }
 
 func toggleAutostart() {
+	if !autostart.IsElevated() {
+		ui.ShowWarning("Usqay Print Client - Permisos Insuficientes",
+			"\"Iniciar con el sistema\" necesita privilegios de administrador (registra/elimina una tarea programada de Windows).\n\n"+
+				"Cierre el agente y vuelva a abrirlo con \"Ejecutar como administrador\" (click derecho sobre el .exe) antes de usar esta opcion.")
+		return
+	}
+
 	enabled, err := autostart.IsEnabled()
 	if err != nil {
 		slog.Warn("no se pudo verificar estado de autostart", "error", err)

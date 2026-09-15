@@ -16,7 +16,6 @@ import (
 
 	"usqay-print-client/internal/autostart"
 	"usqay-print-client/internal/ui"
-	"usqay-print-client/internal/winconsole"
 )
 
 var (
@@ -78,7 +77,6 @@ const (
 	idmReload    = 1001
 	idmAutostart = 1002
 	idmExit      = 1003
-	idmConsole   = 1004
 
 	// idiApplication (32512) is the resource ID under which goversioninfo
 	// embeds icon.ico when building (see versioninfo.json). Passing our own
@@ -324,10 +322,6 @@ func wndProc(hwnd uintptr, message uint32, wParam uintptr, lParam uintptr) uintp
 				if currentTray.callbacks.OnToggleAutostart != nil {
 					currentTray.callbacks.OnToggleAutostart()
 				}
-			case idmConsole:
-				if currentTray.callbacks.OnToggleConsole != nil {
-					currentTray.callbacks.OnToggleConsole()
-				}
 			case idmExit:
 				if currentTray.callbacks.OnExit != nil {
 					currentTray.callbacks.OnExit()
@@ -366,13 +360,6 @@ func showContextMenu(hwnd windows.HWND) {
 	}
 	autostartStr, _ := syscall.UTF16PtrFromString("Iniciar con el sistema")
 	procAppendMenuW.Call(hMenu, autostartFlags, uintptr(idmAutostart), uintptr(unsafe.Pointer(autostartStr)))
-
-	consoleFlags := uintptr(mfString)
-	if winconsole.IsVisible() {
-		consoleFlags |= uintptr(mfChecked)
-	}
-	consoleStr, _ := syscall.UTF16PtrFromString("Mostrar consola de proceso")
-	procAppendMenuW.Call(hMenu, consoleFlags, uintptr(idmConsole), uintptr(unsafe.Pointer(consoleStr)))
 
 	procAppendMenuW.Call(hMenu, uintptr(mfSeparator), 0, 0)
 

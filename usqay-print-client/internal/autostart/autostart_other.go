@@ -9,6 +9,10 @@ import (
 	"path/filepath"
 )
 
+// IsElevated always reports true outside Windows: writing to
+// ~/.config/autostart never needs elevated privileges.
+func IsElevated() bool { return true }
+
 func Install() error {
 	exePath, err := os.Executable()
 	if err != nil {

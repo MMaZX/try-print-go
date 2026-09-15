@@ -7,7 +7,6 @@ type Callbacks struct {
 	OnShowStatus      func()
 	OnReload          func()
 	OnToggleAutostart func()
-	OnToggleConsole   func()
 	OnExit            func()
 }
 
