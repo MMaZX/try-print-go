@@ -143,6 +143,25 @@ Si la conexión cae: los trabajos guardados en SQLite siguen procesándose. Al r
 
 > La configuración de impresoras **no va en config.json**. El servidor la entrega automáticamente tras validar el token.
 
+#### Si el cliente no encuentra el navegador
+
+El cliente renderiza los tickets en HTML y necesita un navegador Chromium instalado (Edge, Chrome o Brave) para
+generar el raster que se envía a la impresora. Al iniciar, intenta detectarlo automáticamente en rutas estándar
+del sistema (`Program Files`, `/usr/bin`, `PATH`, cachés de Playwright/Puppeteer, etc.).
+
+Si no lo encuentra, agregar la variable de entorno `USQAY_BROWSER_PATH` con la ruta absoluta al ejecutable:
+
+```bash
+USQAY_BROWSER_PATH=C:\Ruta\A\msedge.exe
+```
+
+**Por qué es una variable de entorno y no una key de `config.json`:** es una anulación de infraestructura de la
+máquina (dónde está instalado el navegador en *ese* equipo), no una credencial ni un dato de negocio del agente.
+Mezclarla en `config.json` la expondría al mismo wizard interactivo de primer arranque (sección anterior), que
+solo pregunta por `server_url`, `terminal_id` y `token` — campos que sí identifican al agente ante el servidor.
+Si `USQAY_BROWSER_PATH` no está seteada o el archivo no existe, el cliente cae a la autodetección y, si tampoco
+encuentra nada, falla con `ErrBrowserNotFound` (`internal/htmlrender/browser.go`).
+
 ### Cómo obtener el token del agente
 
 El token lo genera Laravel al registrar una terminal desde el panel:
