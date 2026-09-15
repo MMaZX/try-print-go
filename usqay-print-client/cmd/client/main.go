@@ -10,23 +10,59 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
+	"usqay-print-client/internal/autostart"
 	"usqay-print-client/internal/config"
 	"usqay-print-client/internal/localapi"
 	"usqay-print-client/internal/logging"
 	"usqay-print-client/internal/printer"
 	"usqay-print-client/internal/queue"
+	"usqay-print-client/internal/tray"
+	"usqay-print-client/internal/ui"
+	"usqay-print-client/internal/winconsole"
 	"usqay-print-client/internal/ws"
 )
 
+const AppVersion = "2026.1.0"
+
 func main() {
-	listFlag   := flag.Bool("list", false, "listar impresoras disponibles y salir")
+	listFlag := flag.Bool("list", false, "listar impresoras disponibles y salir")
 	insertFlag := flag.Bool("insert", false, "insertar un trabajo de prueba en la cola y salir")
+	headlessFlag := flag.Bool("headless", false, "ejecutar sin bandeja del sistema (Windows); en Linux siempre es headless")
+	installerFlag := flag.Bool("installer", false, "registrar inicio automatico (Task Scheduler / autostart) y salir")
+	uninstallFlag := flag.Bool("uninstaller", false, "remover inicio automatico y salir")
+	versionFlag := flag.Bool("version", false, "mostrar version y salir")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("usqay-print-client - Version %s\n", AppVersion)
+		return
+	}
+
+	if *installerFlag {
+		if err := autostart.Install(); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR al instalar inicio automatico: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Inicio automatico configurado exitosamente.")
+		return
+	}
+
+	if *uninstallFlag {
+		if err := autostart.Uninstall(); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR al remover inicio automatico: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Inicio automatico removido exitosamente.")
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -36,6 +72,14 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)
+	}
+
+	// config.json ya existe (o el wizard de primer arranque, que necesita la
+	// consola, ya termino): nada mas que escribir/leer por consola de aqui
+	// en adelante, asi que en Windows se oculta la ventana de consola para
+	// que ejecutar via Task Scheduler no deje un cmd.exe negro visible.
+	if !*headlessFlag {
+		winconsole.Hide()
 	}
 
 	// --- Logging (archivo diario + stdout) ---
@@ -118,10 +162,21 @@ func main() {
 		}
 	}
 
-	// --- Worker con callback de notificación al servidor ---
+	// --- Tray: creado antes de arrancar el worker, que puede notificar un
+	// fallo de impresion de inmediato ---
+	t := tray.NewTray(*headlessFlag)
+
+	// --- Worker con callback de notificación al servidor + tray ---
 	prnDir := filepath.Join(resolveExeDir(), "captured_prns")
 	worker := queue.NewWorker(repo, registry, func(jobID string, estado queue.Estado, errMsg string) {
 		conn.Notify(jobID, estado, errMsg)
+		if estado == queue.EstadoError {
+			t.NotifyPrintError(
+				"Usqay Print - Error de Impresion",
+				fmt.Sprintf("No se pudo imprimir el trabajo #%s", jobID),
+				fmt.Sprintf("Trabajo ID: %s\n\nError:\n%s", jobID, errMsg),
+			)
+		}
 	}, cfg.CapturePRN, prnDir, cfg.MaxRetries)
 
 	// --- Servidor HTTP local (Propuesta 1: modo offline en LAN) ---
@@ -131,14 +186,159 @@ func main() {
 	go worker.Run(ctx)
 	go localSrv.Run(ctx)
 
-	// --- Esperar señal de apagado (Ctrl+C o SIGTERM) ---
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
+	// windowsTray.Run() (below) only pumps its own GUI message loop — it does
+	// not install any OS signal handler. Without one, closing the console
+	// window the user just showed via "Mostrar consola de proceso" delivers
+	// a Windows console-close event that Go turns into an unhandled SIGTERM,
+	// which kills the whole process (tray included) instead of just closing
+	// that window. Watch for it here and just hide the console again; the
+	// agent keeps running in the tray, and "Salir" remains the only real
+	// exit path. Only needed for the real GUI tray on Windows: --headless
+	// and the non-Windows fallback already install their own signal
+	// handling for a real shutdown.
+	if runtime.GOOS == "windows" && !*headlessFlag {
+		go watchConsoleClose()
+	}
 
-	slog.Info("apagando...")
-	cancel()
+	err = t.Run(tray.Callbacks{
+		OnShowStatus: func() { showConnectionStatus(cfg, conn) },
+		OnReload:     func() { reloadConfig(cancel) },
+		OnToggleAutostart: func() {
+			toggleAutostart()
+		},
+		OnToggleConsole: func() {
+			winconsole.Toggle()
+		},
+		OnExit: func() {
+			slog.Info("apagando...", "src", "TRAY")
+			cancel()
+		},
+	})
+	if err != nil {
+		slog.Error("error en ejecucion de la bandeja del sistema", "error", err)
+	}
+
 	time.Sleep(600 * time.Millisecond) // drain in-flight messages
+}
+
+// watchConsoleClose intercepta Ctrl+C y el evento de cierre de la ventana de
+// consola (el "x"), que Windows traduce a la misma señal de terminacion.
+// Aqui eso solo oculta la consola de nuevo — el agente sigue vivo en la
+// bandeja, y "Salir" del menu del tray sigue siendo la unica forma real de
+// apagarlo. Solo se usa mientras corre el tray grafico real en Windows (ver
+// llamador); en modo headless o Linux, Ctrl+C/SIGTERM sí deben cerrar todo,
+// y esos modos ya instalan su propio manejo de señales en internal/tray.
+func watchConsoleClose() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	for range sigChan {
+		slog.Info("consola cerrada: se oculta, el agente sigue activo en la bandeja (usa \"Salir\" del tray para apagarlo)", "src", "TRAY")
+		winconsole.Hide()
+	}
+}
+
+// reloadConfig valida el config.json actual y, si es correcto, relanza el
+// mismo ejecutable con los mismos argumentos y termina este proceso. No se
+// hace hot-swap del *config.Config que ya usa ws.Connection: server_url y
+// token requieren reconectar el socket de todas formas, y mutar esos campos
+// sin proteccion desde el hilo del tray abriria una carrera de datos con las
+// goroutines que ya los leen.
+func reloadConfig(cancel context.CancelFunc) {
+	if _, err := config.Load(); err != nil {
+		ui.ShowError("Usqay Print Client - Error de Configuracion",
+			fmt.Sprintf("No se pudo recargar: config.json invalido.\n\n%v", err))
+		return
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		ui.ShowError("Usqay Print Client", fmt.Sprintf("No se pudo determinar la ruta del ejecutable: %v", err))
+		return
+	}
+
+	cmd := exec.Command(exe, os.Args[1:]...)
+	cmd.Dir = resolveExeDir()
+	if err := cmd.Start(); err != nil {
+		ui.ShowError("Usqay Print Client", fmt.Sprintf("No se pudo reiniciar el proceso: %v", err))
+		return
+	}
+
+	slog.Info("configuracion valida: reiniciando proceso para aplicarla", "src", "TRAY", "pid_nuevo", cmd.Process.Pid)
+	cancel()
+	time.Sleep(300 * time.Millisecond)
+	os.Exit(0)
+}
+
+// showConnectionStatus muestra en un dialogo nativo la informacion de
+// conexion actual: servidor, terminal_id (resuelto por el servidor si no
+// vino fijo en config.json), estado y ultimos eventos de conexion.
+func showConnectionStatus(cfg *config.Config, conn *ws.Connection) {
+	st := conn.Status()
+
+	connState := "Desconectado"
+	if st.Connected {
+		connState = "Conectado"
+	}
+
+	terminalID := st.TerminalID
+	if terminalID == "" {
+		terminalID = "(pendiente de asignar por el servidor)"
+	}
+
+	lastConnected := "nunca"
+	if !st.LastConnectedAt.IsZero() {
+		lastConnected = st.LastConnectedAt.Local().Format("2006-01-02 15:04:05")
+	}
+	lastDisconnected := "—"
+	if !st.LastDisconnectedAt.IsZero() {
+		lastDisconnected = st.LastDisconnectedAt.Local().Format("2006-01-02 15:04:05")
+	}
+
+	msg := fmt.Sprintf(
+		"Estado: %s\n\nServidor: %s\nTerminal ID: %s\nToken: %s\n\nUltima conexion exitosa: %s\nUltima desconexion: %s",
+		connState, st.ServerURL, terminalID, maskToken(cfg.Token), lastConnected, lastDisconnected,
+	)
+	if st.LastError != "" {
+		msg += fmt.Sprintf("\n\nUltimo error: %s", st.LastError)
+	}
+
+	title := "Usqay Print Client - Informacion de Conexion"
+	if st.Connected {
+		ui.ShowInfo(title, msg)
+	} else {
+		ui.ShowWarning(title, msg)
+	}
+}
+
+// maskToken oculta el token salvo sus primeros/ultimos 4 caracteres, para
+// poder confirmar cual esta configurado sin exponerlo entero en pantalla.
+func maskToken(token string) string {
+	if len(token) <= 8 {
+		return strings.Repeat("*", len(token))
+	}
+	return token[:4] + strings.Repeat("*", len(token)-8) + token[len(token)-4:]
+}
+
+func toggleAutostart() {
+	enabled, err := autostart.IsEnabled()
+	if err != nil {
+		slog.Warn("no se pudo verificar estado de autostart", "error", err)
+	}
+
+	if enabled {
+		if err := autostart.Uninstall(); err != nil {
+			ui.ShowError("Usqay Print Client", fmt.Sprintf("Error al desinstalar inicio automatico: %v", err))
+		} else {
+			ui.ShowInfo("Usqay Print Client", "Inicio automatico con el sistema desactivado.")
+		}
+		return
+	}
+
+	if err := autostart.Install(); err != nil {
+		ui.ShowError("Usqay Print Client", fmt.Sprintf("Error al instalar inicio automatico: %v", err))
+	} else {
+		ui.ShowInfo("Usqay Print Client", "Inicio automatico con el sistema activado correctamente.")
+	}
 }
 
 // buildTestJob builds a sample comanda job for -insert flag testing.

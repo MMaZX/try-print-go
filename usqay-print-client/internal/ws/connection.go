@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -28,6 +29,17 @@ type outMsg struct {
 	jobID string // If non-empty, job to delete from SQLite repository upon successful delivery
 }
 
+// ConnectionStatus is a point-in-time snapshot of the connection state,
+// safe to read from any goroutine via Connection.Status (e.g. the tray).
+type ConnectionStatus struct {
+	ServerURL          string
+	TerminalID         string // from config.json, or resolved live by the server once known
+	Connected          bool
+	LastError          string
+	LastConnectedAt    time.Time
+	LastDisconnectedAt time.Time
+}
+
 // Connection manages the WebSocket connection to the print server, including
 // automatic reconnection with exponential backoff.
 type Connection struct {
@@ -36,6 +48,9 @@ type Connection struct {
 	registry   *printer.Registry
 	terminalID string      // set after receiving the first TypeConfig from the server
 	outgoing   chan outMsg // buffered; written by Notify, drained by writeLoop
+
+	statusMu sync.RWMutex
+	status   ConnectionStatus
 }
 
 // NewConnection creates a Connection. Call Run in a goroutine to activate it.
@@ -45,6 +60,10 @@ func NewConnection(cfg *config.Config, repo *queue.Repository, registry *printer
 		repo:     repo,
 		registry: registry,
 		outgoing: make(chan outMsg, 64),
+		status: ConnectionStatus{
+			ServerURL:  cfg.ServerURL,
+			TerminalID: cfg.TerminalID,
+		},
 	}
 }
 
@@ -72,11 +91,44 @@ func (c *Connection) Notify(jobID string, estado queue.Estado, errMsg string) {
 	}
 }
 
+// Status returns a snapshot of the current connection state. Safe to call
+// from any goroutine (e.g. the tray's "connection info" menu item).
+func (c *Connection) Status() ConnectionStatus {
+	c.statusMu.RLock()
+	defer c.statusMu.RUnlock()
+	return c.status
+}
+
+func (c *Connection) setConnected(connected bool, errMsg string) {
+	c.statusMu.Lock()
+	defer c.statusMu.Unlock()
+	c.status.Connected = connected
+	if connected {
+		c.status.LastConnectedAt = time.Now()
+		c.status.LastError = ""
+		return
+	}
+	c.status.LastDisconnectedAt = time.Now()
+	if errMsg != "" {
+		c.status.LastError = errMsg
+	}
+}
+
+func (c *Connection) setStatusTerminalID(id string) {
+	if id == "" {
+		return
+	}
+	c.statusMu.Lock()
+	defer c.statusMu.Unlock()
+	c.status.TerminalID = id
+}
+
 // Run connects and reconnects with exponential backoff until ctx is cancelled.
 func (c *Connection) Run(ctx context.Context) {
 	delay := time.Second
 	for ctx.Err() == nil {
 		if err := c.connectAndServe(ctx); err != nil && ctx.Err() == nil {
+			c.setConnected(false, err.Error())
 			slog.Warn("WebSocket desconectado, reintentando",
 				"error", err, "espera", delay)
 			select {
@@ -91,6 +143,7 @@ func (c *Connection) Run(ctx context.Context) {
 			delay = time.Second // reset backoff after a successful connection
 		}
 	}
+	c.setConnected(false, "")
 	slog.Info("conexión WebSocket detenida")
 }
 
@@ -111,6 +164,7 @@ func (c *Connection) connectAndServe(ctx context.Context) error {
 	if err := c.handshake(connCtx, wsConn); err != nil {
 		return err
 	}
+	c.setConnected(true, "")
 	slog.Info("registrado con el servidor")
 
 	// Run both loops concurrently; either failing triggers connCancel.
@@ -355,6 +409,7 @@ func (c *Connection) LoadCachedConfig() error {
 // hydrateRegistry configures terminal ID, resets the registry, and populates it with live Printer instances.
 func (c *Connection) hydrateRegistry(printers []PrinterSpec, terminalID string) int {
 	c.terminalID = terminalID
+	c.setStatusTerminalID(terminalID)
 	c.registry.Clear()
 
 	count := 0
