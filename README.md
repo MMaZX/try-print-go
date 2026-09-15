@@ -155,12 +155,27 @@ Si no lo encuentra, agregar la variable de entorno `USQAY_BROWSER_PATH` con la r
 USQAY_BROWSER_PATH=C:\Ruta\A\msedge.exe
 ```
 
-**Por qué es una variable de entorno y no una key de `config.json`:** es una anulación de infraestructura de la
-máquina (dónde está instalado el navegador en *ese* equipo), no una credencial ni un dato de negocio del agente.
-Mezclarla en `config.json` la expondría al mismo wizard interactivo de primer arranque (sección anterior), que
-solo pregunta por `server_url`, `terminal_id` y `token` — campos que sí identifican al agente ante el servidor.
-Si `USQAY_BROWSER_PATH` no está seteada o el archivo no existe, el cliente cae a la autodetección y, si tampoco
-encuentra nada, falla con `ErrBrowserNotFound` (`internal/htmlrender/browser.go`).
+**Paso 1 — buscar el binario del navegador:** en el equipo donde corre el agente, ubicar el ejecutable de Edge,
+Chrome o Brave. Por defecto suele estar en alguna de estas rutas:
+
+```
+C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
+**Paso 2 — copiar su ruta completa** (la del ejecutable `.exe`, no la carpeta).
+
+**Paso 3 — en una terminal PowerShell como administrador, ejecutar:**
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("USQAY_BROWSER_PATH", "C:\Ruta\A\msedge.exe", "Machine")
+```
+
+Esto deja la variable seteada a nivel de sistema (persiste entre reinicios). Después de ejecutarla, reiniciar el
+agente para que tome el nuevo valor.
+
+Si `USQAY_BROWSER_PATH` no está seteada, el cliente cae a la autodetección y, si tampoco encuentra nada, falla con
+`ErrBrowserNotFound` (`internal/htmlrender/browser.go`).
 
 ### Cómo obtener el token del agente
 
