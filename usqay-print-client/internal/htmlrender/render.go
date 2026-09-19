@@ -3,6 +3,7 @@ package htmlrender
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -26,7 +27,7 @@ import (
 	"usqay-print-client/internal/printer"
 )
 
-const defaultRenderTimeout = 10 * time.Second
+const defaultRenderTimeout = 30 * time.Second
 
 // maxEngineAge y maxEngineJobs fuerzan el reciclado del motor persistente
 // incluso si nunca reporta estar "unhealthy": es un cinturón de seguridad
@@ -49,6 +50,12 @@ type Engine struct {
 	browserCancel context.CancelFunc
 	createdAt     time.Time
 	jobsHandled   int
+
+	// unhealthy se marca cuando un render individual vence su timeout: es
+	// señal de que la pestaña (o el proceso de Chromium detrás de ella) quedó
+	// colgada, así que forzamos el reciclado del motor en el siguiente job en
+	// vez de esperar al límite de edad/tickets (maxEngineAge/maxEngineJobs).
+	unhealthy bool
 
 	// jobHandle es el handle de Windows al Job Object que agrupa a Chromium y
 	// sus procesos hijos (0 en Linux, o si la asignacion fallo/no dio tiempo).
@@ -177,7 +184,13 @@ func (e *Engine) isHealthy() bool {
 	e.mu.Lock()
 	age := time.Since(e.createdAt)
 	jobs := e.jobsHandled
+	unhealthy := e.unhealthy
 	e.mu.Unlock()
+	if unhealthy {
+		slog.Warn("reciclando motor Chromium persistente (timeout de render detectado)",
+			"edad", age, "tickets_procesados", jobs, "src", "CHROMIUM")
+		return false
+	}
 	if age >= maxEngineAge || jobs >= maxEngineJobs {
 		slog.Info("reciclando motor Chromium persistente (limite de edad/tickets alcanzado)",
 			"edad", age, "tickets_procesados", jobs, "src", "CHROMIUM")
@@ -227,15 +240,20 @@ func (e *Engine) RenderHTMLToPNG(ctx context.Context, htmlContent string, widthD
 
 	var buf []byte
 	err = chromedp.Run(timeoutCtx,
-		// Alto de viewport amplio: los tickets crecen verticalmente sin límite conocido y
-		// EmulateViewport fija deviceScaleFactor=1. La captura de #ticket usa
-		// captureBeyondViewport, pero un viewport generoso evita cualquier recorte vertical.
-		chromedp.EmulateViewport(int64(widthDots), 20000),
+		// Alto de viewport acotado a 8000px: hardware objetivo son máquinas modestas
+		// (Celeron/Pentium 2 núcleos, HDD) donde un canvas de 20000px encarecía el
+		// layout/paint de cada render. EmulateViewport fija deviceScaleFactor=1. La
+		// captura de #ticket usa NodeVisible, que no recorta aunque el contenido
+		// exceda el viewport — 8000px cubre tickets largos con margen razonable.
+		chromedp.EmulateViewport(int64(widthDots), 8000),
 		chromedp.Navigate(pageURL),
 		chromedp.WaitVisible("#ticket", chromedp.ByID),
 		chromedp.Screenshot("#ticket", &buf, chromedp.NodeVisible, chromedp.ByID),
 	)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			e.unhealthy = true
+		}
 		return nil, fmt.Errorf("captura en pestaña chromedp: %w", err)
 	}
 

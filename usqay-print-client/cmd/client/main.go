@@ -29,7 +29,7 @@ import (
 	"usqay-print-client/internal/ws"
 )
 
-const AppVersion = "2026.1.2"
+const AppVersion = "2026.1.3"
 
 func main() {
 	listFlag := flag.Bool("list", false, "listar impresoras disponibles y salir")
