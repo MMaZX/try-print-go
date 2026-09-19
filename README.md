@@ -140,8 +140,16 @@ Si la conexión cae: los trabajos guardados en SQLite siguen procesándose. Al r
 | `server_url` | URL WebSocket del servidor (`ws://` o `wss://`) |
 | `token` | Token del agente generado desde el panel de Laravel |
 | `log_level` | `debug` / `info` / `warn` / `error` (opcional, default `info`) |
+| `render_mode` | `html` (default) o `lite` (opcional) — ver abajo |
 
 > La configuración de impresoras **no va en config.json**. El servidor la entrega automáticamente tras validar el token.
+
+#### `render_mode`: `html` vs `lite`
+
+- **`html`** (default): cada ticket se compone como HTML/CSS y se rasteriza con Chromium headless (`internal/htmlrender`). Soporta el 100% del schema, incluyendo layout arbitrario. Requiere CPU/RAM razonables — en hardware modesto (CPU débil de una sola generación atrás, HDD) el render puede tardar varios segundos por ticket.
+- **`lite`**: el JSON del ticket se traduce directo a comandos ESC/POS nativos (texto, tablas, columnas, QR y código de barras nativos de la impresora), sin pasar por Chromium (`internal/htmlrender/escpos_native.go`). Mucho más rápido y liviano — pensado para terminales con hardware limitado. Limitaciones conocidas: el tamaño de fuente (`size: "medium"/"double"`) de celdas dentro de una fila de `table` normal no se aplica (sí en filas `merge`); el resto del schema (`text`, `separator`, `spacer`, `columns`, `qr`, `barcode`, `image`) está soportado.
+
+Es una opción por terminal (un `config.json` por máquina), pensada para activarse solo donde el render con navegador es el cuello de botella real.
 
 #### Si el cliente no encuentra el navegador
 

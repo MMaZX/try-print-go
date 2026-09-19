@@ -24,3 +24,10 @@ func RenderToPNG(prof *printer.DeviceProfile, payloadJSON string, outputPath str
 func RenderThermal(prof *printer.DeviceProfile, payloadJSON string) ([]byte, error) {
 	return htmlrender.RenderThermal(prof, payloadJSON)
 }
+
+// RenderThermalLite convierte un PrintPayload JSON en bytes ESC/POS traduciendo
+// cada bloque directo a comandos nativos de la impresora, sin pasar por
+// Chromium. Ver htmlrender.RenderThermalNative y config.RenderModeLite.
+func RenderThermalLite(prof *printer.DeviceProfile, payloadJSON string) ([]byte, error) {
+	return htmlrender.RenderThermalNative(prof, payloadJSON)
+}

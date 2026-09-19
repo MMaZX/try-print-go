@@ -31,11 +31,14 @@ type Worker struct {
 	capturePRN    bool
 	capturePRNDir string
 	maxRetries    int
+	liteRender    bool
 }
 
 // NewWorker creates a Worker backed by repo and the printer registry.
 // notify is called after each job reaches PRINTED or ERROR; pass nil to skip.
-func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc, capturePRN bool, capturePRNDir string, maxRetries int) *Worker {
+// liteRender activa el renderer nativo ESC/POS (config.RenderModeLite) en vez
+// del motor Chromium/HTML para todos los trabajos de imagen de este terminal.
+func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc, capturePRN bool, capturePRNDir string, maxRetries int, liteRender bool) *Worker {
 	if maxRetries <= 0 {
 		maxRetries = DefaultMaxRetries
 	}
@@ -46,6 +49,7 @@ func NewWorker(repo *Repository, registry *printer.Registry, notify NotifyFunc, 
 		capturePRN:    capturePRN,
 		capturePRNDir: capturePRNDir,
 		maxRetries:    maxRetries,
+		liteRender:    liteRender,
 	}
 }
 
@@ -134,6 +138,8 @@ func (w *Worker) processNext() {
 	renderStart := time.Now()
 	if p.Mode() == "text" {
 		data, renderErr = renderText(prof, job.Payload)
+	} else if w.liteRender {
+		data, renderErr = RenderThermalLite(prof, job.Payload)
 	} else {
 		data, renderErr = RenderThermal(prof, job.Payload)
 	}

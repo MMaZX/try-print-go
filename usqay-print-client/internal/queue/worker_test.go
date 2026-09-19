@@ -81,7 +81,7 @@ func TestWorker_Retry(t *testing.T) {
 			notifications = append(notifications, notifyRecord{jobID, estado, errMsg})
 		}
 
-		w := queue.NewWorker(repo, registry, notifyFn, false, "", 3)
+		w := queue.NewWorker(repo, registry, notifyFn, false, "", 3, false)
 
 		now := time.Now().UTC()
 		job := queue.PrintJob{
@@ -178,7 +178,7 @@ func TestWorker_Retry(t *testing.T) {
 			notifications = append(notifications, notifyRecord{jobID, estado, errMsg})
 		}
 
-		w := queue.NewWorker(repo, registry, notifyFn, false, "", 2) // max 2 intentos
+		w := queue.NewWorker(repo, registry, notifyFn, false, "", 2, false) // max 2 intentos
 
 		now := time.Now().UTC()
 		job := queue.PrintJob{
@@ -262,7 +262,7 @@ func TestWorker_Retry(t *testing.T) {
 			notifications = append(notifications, notifyRecord{jobID, estado, errMsg})
 		}
 
-		w := queue.NewWorker(repo, registry, notifyFn, false, "", 3)
+		w := queue.NewWorker(repo, registry, notifyFn, false, "", 3, false)
 
 		now := time.Now().UTC()
 		job := queue.PrintJob{

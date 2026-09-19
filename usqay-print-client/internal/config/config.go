@@ -17,6 +17,16 @@ const DefaultMaxRetries = 3
 // DefaultLocalAPIPort is the port the local HTTP print endpoint listens on when local_api_port is unset.
 const DefaultLocalAPIPort = 9100
 
+// RenderModeHTML es el motor de render por defecto: cada ticket se compone
+// como HTML/CSS y se rasteriza vía Chromium headless (internal/htmlrender).
+const RenderModeHTML = "html"
+
+// RenderModeLite traduce el JSON del ticket directo a comandos ESC/POS
+// (texto, QR y barcode nativos de la impresora), sin pasar por Chromium.
+// Pensado para hardware modesto (CPU débil, HDD) donde el render con
+// navegador es el cuello de botella. Ver internal/htmlrender/escpos_native.go.
+const RenderModeLite = "lite"
+
 // Config holds all runtime configuration loaded from config.json.
 type Config struct {
 	ServerURL     string `json:"server_url"`
@@ -27,6 +37,7 @@ type Config struct {
 	MaxRetries    int    `json:"max_retries,omitempty"`
 	LocalAPIPort  int    `json:"local_api_port,omitempty"`
 	LocalAPIToken string `json:"local_api_token,omitempty"`
+	RenderMode    string `json:"render_mode,omitempty"` // "html" (default) o "lite"
 }
 
 // Load reads config.json from the directory containing the executable.
@@ -71,6 +82,11 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.LocalAPIPort <= 0 {
 		cfg.LocalAPIPort = DefaultLocalAPIPort
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.RenderMode)) == RenderModeLite {
+		cfg.RenderMode = RenderModeLite
+	} else {
+		cfg.RenderMode = RenderModeHTML
 	}
 }
 

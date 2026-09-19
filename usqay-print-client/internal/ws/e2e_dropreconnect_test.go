@@ -187,7 +187,7 @@ func TestE2E_DropAndReconnect(t *testing.T) {
 	}
 
 	conn := NewConnection(cfg, repo, registry)
-	worker := queue.NewWorker(repo, registry, conn.Notify, false, "", cfg.MaxRetries)
+	worker := queue.NewWorker(repo, registry, conn.Notify, false, "", cfg.MaxRetries, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

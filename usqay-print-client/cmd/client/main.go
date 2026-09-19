@@ -29,7 +29,7 @@ import (
 	"usqay-print-client/internal/ws"
 )
 
-const AppVersion = "2026.1.3"
+const AppVersion = "2026.1.4"
 
 func main() {
 	listFlag := flag.Bool("list", false, "listar impresoras disponibles y salir")
@@ -184,7 +184,7 @@ func main() {
 				fmt.Sprintf("Trabajo ID: %s\n\nError:\n%s", jobID, errMsg),
 			)
 		}
-	}, cfg.CapturePRN, prnDir, cfg.MaxRetries)
+	}, cfg.CapturePRN, prnDir, cfg.MaxRetries, cfg.RenderMode == config.RenderModeLite)
 
 	// --- Servidor HTTP local (Propuesta 1: modo offline en LAN) ---
 	localSrv := localapi.NewServer(cfg, repo)
